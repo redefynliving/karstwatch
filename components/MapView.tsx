@@ -63,6 +63,7 @@ export default function MapView() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pinRef = useRef<maplibregl.Marker | null>(null);
 
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ hillshade: true, karst: true, springs: false });
@@ -72,6 +73,7 @@ export default function MapView() {
   const [scanBbox, setScanBbox] = useState<[number, number, number, number] | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [hasShape, setHasShape] = useState(false);
+  const [drawing, setDrawing] = useState(false);
 
   // Predictive search
   const [query, setQuery] = useState("");
@@ -190,12 +192,16 @@ export default function MapView() {
       drawRef.current = draw;
 
       map.on("draw.create", () => {
+        setDrawing(false);
         const all = draw.getAll();
         if (all.features.length > 1) {
           const keep = all.features[all.features.length - 1].id;
           for (const f of all.features) if (f.id !== keep) draw.delete(f.id as string);
         }
         setHasShape(true);
+      });
+      map.on("draw.modechange", (e) => {
+        setDrawing(e.mode === "draw_polygon");
       });
       map.on("draw.delete", () => setHasShape(false));
 
@@ -374,8 +380,38 @@ export default function MapView() {
   };
 
   const goTo = (r: GeoResult) => {
-    mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 14, duration: 1400 });
+    mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 15, duration: 1400 });
+    // Drop a pin at the chosen address so the spot stays marked.
+    if (pinRef.current) pinRef.current.remove();
+    const el = document.createElement("div");
+    el.innerHTML =
+      `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden>` +
+      `<path d="M12 22s-8-6.6-8-12a8 8 0 1 1 16 0c0 5.4-8 12-8 12z" fill="#b3402e" stroke="#fff" stroke-width="1.6"/>` +
+      `<circle cx="12" cy="10" r="3" fill="#fff"/></svg>`;
+    el.style.cssText = "cursor:pointer;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35));";
+    pinRef.current = new maplibregl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([r.lng, r.lat])
+      .addTo(mapRef.current!);
     setGeoResults([]); setQuery(r.main); setSearchOpen(false);
+  };
+
+  const startDrawing = () => {
+    const draw = drawRef.current;
+    const map = mapRef.current;
+    if (!draw || !map || !ready) return;
+    // Clear any previous shape first so each draw starts fresh.
+    draw.deleteAll();
+    setHasShape(false);
+    setSelected(null);
+    setError(null);
+    draw.changeMode("draw_polygon");
+    // On mobile the sheet covers half the map — collapse focus to the canvas.
+    map.getCanvas().focus?.();
+  };
+
+  const deleteShape = () => {
+    drawRef.current?.deleteAll();
+    setHasShape(false);
   };
 
   const copyLink = async () => {
@@ -494,13 +530,43 @@ export default function MapView() {
           </li>
           <li className="flex items-start gap-3">
             <span className={`kw-step-chip ${step===2?"kw-step-chip--active":step>2?"kw-step-chip--done":"kw-step-chip--idle"}`}>2</span>
-            <p className="text-sm leading-snug"><b>Draw your area.</b> <span className="text-kw-muted">Polygon tool top-left of the map. Click points around the property, double-click to close.</span></p>
+            <p className="text-sm leading-snug"><b>Draw your area.</b> <span className="text-kw-muted">Tap "Draw area" below, then click points around the property on the map. Double-click to finish.</span></p>
           </li>
           <li className="flex items-start gap-3">
             <span className={`kw-step-chip ${step===3?"kw-step-chip--active":"kw-step-chip--idle"}`}>3</span>
             <p className="text-sm leading-snug"><b>Run the check.</b> <span className="text-kw-muted">We find bowl-shaped dips in the ground.</span></p>
           </li>
         </ol>
+
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={startDrawing}
+            disabled={!ready}
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+              drawing
+                ? "border-kw-accent bg-kw-accent text-white shadow-[0_0_0_4px_var(--kw-accent-soft)]"
+                : "border-kw-line bg-white text-kw-ink hover:border-kw-accent hover:bg-kw-accent-soft/50"
+            }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+            </svg>
+            {drawing ? "Tap points on map…" : hasShape ? "Redraw area" : "Draw area"}
+          </button>
+          {hasShape && (
+            <button
+              onClick={deleteShape}
+              aria-label="Delete drawn area"
+              className="rounded-xl border border-kw-line bg-white px-3 py-2.5 text-kw-muted transition hover:border-kw-danger hover:text-kw-danger"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>
+              </svg>
+            </button>
+          )}
+        </div>
 
         <button onClick={startScan} disabled={!ready || scanning}
           className="kw-cta mt-4 flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-white">
@@ -509,7 +575,7 @@ export default function MapView() {
               <span className="kw-spinner" style={{ borderTopColor:"#fff", borderColor:"rgba(255,255,255,.35)" }} />
               Reading elevation…
             </>
-          ) : hasShape ? "Check this area →" : "Check this area — draw a box first"}
+          ) : hasShape ? "Check this area →" : "Check this area"}
         </button>
 
         {error && (
