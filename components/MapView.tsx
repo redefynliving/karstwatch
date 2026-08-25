@@ -15,9 +15,17 @@ const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"];
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
-type LayerKey = "hillshade" | "karst" | "springs";
+type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs";
 interface GeoResult { main: string; sub: string; full: string; kind: string; lat: number; lng: number; }
 interface NearestInfo { source: string; distanceM: number; }
+interface HistoryItem {
+  id: string;
+  label: string;
+  bbox: [number, number, number, number];
+  date: number;
+  dips: number;
+  avgDepth: number;
+}
 
 function depthColor(d: number): string {
   if (d >= 5) return "#b3402e";
@@ -66,7 +74,10 @@ export default function MapView() {
   const pinRef = useRef<maplibregl.Marker | null>(null);
 
   const [ready, setReady] = useState(false);
-  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ hillshade: true, karst: true, springs: false });
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    countyHeat: true, hillshade: true, karst: true, springs: false,
+  });
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Depression[] | null>(null);
@@ -83,6 +94,14 @@ export default function MapView() {
   const searchBoxRef = useRef<HTMLDivElement>(null);
 
   const [selected, setSelected] = useState<Depression | null>(null);
+  const [geoLabel, setGeoLabel] = useState<string | null>(null);
+
+  // Load scan history from localStorage on first mount.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try { setHistory(JSON.parse(localStorage.getItem("kw-history") ?? "[]")); } catch {}
+    }
+  }, []);
   const [nearest, setNearest] = useState<NearestInfo[] | null>(null);
   const [nearestLoading, setNearestLoading] = useState(false);
 
@@ -108,6 +127,7 @@ export default function MapView() {
           karst: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           springs: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
         },
         layers: [
           { id: "bg", type: "background", paint: { "background-color": "#eef0ea" } },
@@ -119,6 +139,15 @@ export default function MapView() {
             paint: { "fill-color": "#b07a24", "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.05, 0.13] } },
           { id: "karst-line", type: "line", source: "karst",
             paint: { "line-color": "#c49256", "line-width": 1, "line-dasharray": [2, 2] } },
+          { id: "county-circles", type: "circle", source: "county",
+            paint: {
+              "circle-radius": ["interpolate", ["linear"], ["get", "depth"], 1, 4, 5, 9, 10, 16],
+              "circle-color": ["interpolate", ["linear"], ["get", "depth"],
+                1, "#5ac85a", 3, "#ffd93d", 6, "#ff6b35", 12, "#c1292e"],
+              "circle-stroke-color": "#fff", "circle-stroke-width": 0.5,
+              "circle-stroke-opacity": 0.7, "circle-opacity": 0.8,
+            },
+          },
           { id: "depressions-fill", type: "fill", source: "depressions",
             paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
           { id: "depressions-line", type: "line", source: "depressions",
@@ -213,6 +242,22 @@ export default function MapView() {
           (map.getSource("karst") as maplibregl.GeoJSONSource)?.setData(polys);
           (map.getSource("springs") as maplibregl.GeoJSONSource)?.setData(points);
         })
+      fetch(`/api/karst?bbox=${COUNTY_BBOX}`)
+        .then((r) => r.json())
+        .then((gj) => {
+          const polys = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type !== "Point") };
+          const points = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type === "Point") };
+          (map.getSource("karst") as maplibregl.GeoJSONSource)?.setData(polys);
+          (map.getSource("springs") as maplibregl.GeoJSONSource)?.setData(points);
+        })
+        .catch(() => {});
+
+      // County-wide heat layer: loads from precomputed static file (free, fast, no lambda)
+      fetch("/api/heat")
+        .then((r) => r.json())
+        .then((gj) => {
+          (map.getSource("county") as maplibregl.GeoJSONSource)?.setData(gj);
+        })
         .catch(() => {});
 
       map.on("click", "depressions-fill", (e) => {
@@ -274,6 +319,7 @@ export default function MapView() {
       mapRef.current.setLayoutProperty("karst-line", "visibility", vis);
     }
     if (key === "springs") mapRef.current.setLayoutProperty("springs-circle", "visibility", vis);
+    if (key === "countyHeat") mapRef.current.setLayoutProperty("county-circles", "visibility", vis);
   };
 
   const clearScan = () => {
@@ -324,6 +370,19 @@ export default function MapView() {
         setError("Good news — no sinkhole-shaped dips found in this spot.");
       } else {
         loadNearest((bbox[1]+bbox[3])/2, (bbox[0]+bbox[2])/2);
+        // Persist to scan history.
+        const avgDepth = deps.reduce((a, d) => a + d.depthM, 0) / deps.length;
+        const item: HistoryItem = {
+          id: crypto.randomUUID(),
+          label: geoLabel ?? `${bbox[0].toFixed(3)}, ${bbox[1].toFixed(3)}`,
+          bbox, date: Date.now(), dips: deps.length, avgDepth,
+        };
+        const prev: HistoryItem[] = JSON.parse(localStorage.getItem("kw-history") ?? "[]");
+        const next = [item, ...prev.filter((p) => p.id !== item.id)].slice(0, 12);
+        localStorage.setItem("kw-history", JSON.stringify(next));
+        setHistory(next);
+        setGeoLabel(null);
+
         mapRef.current?.fitBounds(
           [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
           { padding: { top: 40, bottom: 80, left: 60, right: 60 }, duration: 900 },
@@ -392,7 +451,7 @@ export default function MapView() {
     pinRef.current = new maplibregl.Marker({ element: el, anchor: "bottom" })
       .setLngLat([r.lng, r.lat])
       .addTo(mapRef.current!);
-    setGeoResults([]); setQuery(r.main); setSearchOpen(false);
+    setGeoResults([]); setQuery(r.full); setGeoLabel(r.full); setSearchOpen(false);
   };
 
   const startDrawing = () => {
@@ -660,6 +719,29 @@ export default function MapView() {
           </section>
         )}
 
+        {/* Scan history — your recent checks, tap to reload */}
+        {history.length > 0 && !results && !scanning && !error && (
+          <section className="kw-card mt-4 p-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-kw-muted">Your recent checks</h2>
+            <ul className="mt-2 space-y-1.5">
+              {history.slice(0, 8).map((h) => (
+                <li key={h.id}>
+                  <button
+                    className="kw-row flex w-full cursor-pointer items-center gap-2.5 px-2.5 py-2 text-left"
+                    onClick={() => runScanWith(h.bbox)}
+                  >
+                    <span className="shrink-0 rounded-md bg-kw-amber/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">{h.dips} dip{h.dips === 1 ? "" : "s"}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-kw-ink truncate">{h.label}</span>
+                      <span className="block font-mono text-[11px] text-kw-muted">{new Date(h.date).toLocaleString([], { month:"short", day:"numeric" })} · avg {h.avgDepth.toFixed(1)} m</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {/* Detail card */}
         {selected && (
           <section className="kw-card kw-card--pop kw-animate-pop mt-4 p-4">
@@ -693,6 +775,7 @@ export default function MapView() {
                 ["hillshade", "Shaded terrain"],
                 ["karst", "Known sinkhole areas (state survey)"],
                 ["springs", "Mapped springs"],
+                ["countyHeat", "County-wide dips (heat view)"],
               ] as [LayerKey, string][]).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={layers[key]} onChange={() => toggle(key)} className="accent-kw-accent" disabled={!ready} />

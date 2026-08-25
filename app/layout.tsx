@@ -14,12 +14,26 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "KarstWatch — Sinkhole check for Bloomington",
   description:
-    "Check your land for sinkhole risk in Monroe County, Indiana. Free public data, no account needed.",
+    "Check land around Bloomington for sinkhole risk. Free public data, no account needed.",
+  themeColor: "#2e7d5b",
+  viewport: "width=device-width, initial-scale=1",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "KarstWatch",
+  },
+  icons: [
+    { rel: "icon", sizes: "192x192", url: "/icon-192.png" },
+    { rel: "apple-touch-icon", sizes: "192x192", url: "/icon-192.png" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${mulish.variable} ${plexMono.variable}`}>
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+      </head>
       <body className="h-full font-sans antialiased">{children}</body>
     </html>
   );
