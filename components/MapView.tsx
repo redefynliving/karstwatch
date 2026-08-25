@@ -387,6 +387,38 @@ export default function MapView() {
     }
   };
 
+  /** The Verdict: plain-English read of the scan, in one voice. */
+  const verdict = (() => {
+    if (!results) return null;
+    const n = results.length;
+    if (n === 0) {
+      return {
+        tone: "good" as const,
+        headline: "Nothing suspicious here.",
+        body: "No bowl-shaped dips showed up in this spot. That doesn't guarantee the all-clear — buried sinkholes can hide underground — but the surface looks quiet.",
+      };
+    }
+    const deep = results.filter((d) => d.depthM >= 3).length;
+    if (deep > 0) {
+      return {
+        tone: "attention" as const,
+        headline:
+          n === 1 ? "One dip worth a closer look." :
+          deep === n ? `All ${n} dips look serious.` :
+          `${deep} of ${n} dips look serious.`,
+        body:
+          "Deep, closed bowls like these match how sinkholes show up in elevation data. Before you build, dig, or buy out here, talk to a geologist and check Monroe County's sinkhole records. It's cheap insurance.",
+      };
+    }
+    return {
+      tone: "mixed" as const,
+      headline:
+        n === 1 ? "There's a dip here — probably fine." : `${n} shallow dips here.`,
+      body:
+        "These are gentle enough that they could just be drainage, old ponds, or how the land was graded. Sinkholes usually announce themselves deeper than this. Worth a glance on foot after heavy rain — standing water that drains suddenly is the classic tell.",
+    };
+  })();
+
   const step = scanning ? 3 : hasShape ? 2 : 1;
   const showDropdown = searchOpen && geoResults.length > 0;
 
@@ -410,7 +442,7 @@ export default function MapView() {
             <h1 className="text-xl font-extrabold tracking-tight text-kw-ink">KarstWatch</h1>
           </div>
           <p className="mt-1 text-sm text-kw-muted">
-            Is there a sinkhole under your land? Check any spot in Monroe County in seconds.
+            Southern Indiana is hollow in places. Check what's under yours before you build, dig, or buy.
           </p>
         </header>
 
@@ -487,9 +519,28 @@ export default function MapView() {
           </div>
         )}
 
+        {/* The Verdict — the signature moment */}
+        {verdict && !scanning && (
+          <section
+            className={`kw-card kw-animate-pop mt-4 overflow-hidden border-l-4 p-4 ${
+              verdict.tone === "attention" ? "border-l-[#b3402e] bg-[#fdf3f1]" :
+              verdict.tone === "good" ? "border-l-kw-accent bg-kw-accent-soft/60" :
+              "border-l-[#c9962b] bg-[#fbf6ec]"
+            }`}
+          >
+            <p className="text-[11px] font-bold uppercase tracking-widest text-kw-muted">
+              {verdict.tone === "attention" ? "Worth a closer look" : verdict.tone === "good" ? "Looking quiet" : "Mixed signals"}
+            </p>
+            <p className="mt-1 text-lg font-extrabold leading-snug tracking-tight text-kw-ink">
+              {verdict.headline}
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-kw-ink/80">{verdict.body}</p>
+          </section>
+        )}
+
         {/* Results */}
         {results && results.length > 0 && (
-          <section className="kw-animate-pop mt-5">
+          <section className="kw-animate-pop mt-4">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold">{results.length} dip{results.length===1?"":"s"} found</h2>
               <div className="flex gap-3">
