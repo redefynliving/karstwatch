@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --kw-bg: #faf9f7;
+  --kw-surface: #ffffff;
+  --kw-ink: #26241f;
+  --kw-muted: #6f6a61;
+  --kw-line: #e6e2da;
+  --kw-accent: #2e7d5b;
+  --kw-accent-soft: #e7f2ec;
+  --kw-danger: #b3402e;
+}
+
+html, body { height: 100%; }
+
+body {
+  background: var(--kw-bg);
+  color: var(--kw-ink);
+  font-feature-settings: "ss01";
+}
+
+/* Calm maplibre chrome */
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.8) !important;
+}
+.maplibregl-ctrl-group {
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(38, 36, 31, 0.12) !important;
+}
+
+/* Step number chip */
+.kw-step-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.kw-step-chip--active { background: var(--kw-accent); color: #fff; }
+.kw-step-chip--done { background: var(--kw-accent-soft); color: var(--kw-accent); }
+.kw-step-chip--idle { background: transparent; color: var(--kw-muted); border: 1px solid var(--kw-line); }
+
+.kw-card {
+  background: var(--kw-surface);
+  border: 1px solid var(--kw-line);
+  border-radius: 10px;
+}
