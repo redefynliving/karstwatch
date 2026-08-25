@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Address search proxy for Nominatim (OpenStreetMap's free geocoder).
- * No API key; we add a proper User-Agent as their usage policy requires.
- * Free-tier limit: max 1 request/second — fine for human typing.
+ * Address autocomplete proxy for Nominatim (free, no key).
+ * Called debounced from the client as the user types.
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
@@ -14,8 +13,9 @@ export async function GET(req: NextRequest) {
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("q", `${q}, Indiana`);
   url.searchParams.set("format", "json");
-  url.searchParams.set("limit", "5");
-  url.searchParams.set("viewbox", "-87.0,39.6,-86.0,38.9"); // bias to south-central IN
+  url.searchParams.set("limit", "6");
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("viewbox", "-87.0,39.6,-86.0,38.9");
   url.searchParams.set("bounded", "0");
 
   try {
@@ -28,13 +28,21 @@ export async function GET(req: NextRequest) {
       display_name: string;
       lat: string;
       lon: string;
+      type?: string;
+      addresstype?: string;
     }[];
     return NextResponse.json({
-      results: data.map((d) => ({
-        name: d.display_name,
-        lat: parseFloat(d.lat),
-        lng: parseFloat(d.lon),
-      })),
+      results: data.map((d) => {
+        const parts = d.display_name.split(",").map((s) => s.trim());
+        return {
+          main: parts[0],
+          sub: parts.slice(1, 4).join(", "),
+          full: d.display_name,
+          kind: d.addresstype ?? d.type ?? "place",
+          lat: parseFloat(d.lat),
+          lng: parseFloat(d.lon),
+        };
+      }),
     });
   } catch (e) {
     return NextResponse.json(

@@ -8,14 +8,17 @@ import InSARPanel from "@/components/InSARPanel";
 
 const BLOOMINGTON: [number, number] = [-86.5264, 39.1653];
 const COUNTY_BBOX = "-87.0,39.0,-86.0,39.5";
+
+// Carto Positron: clean light basemap, free, no key. Far less visual noise
+// than raw OSM tiles, so our colored results pop.
+const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"];
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
 type LayerKey = "hillshade" | "karst" | "springs";
-interface GeoResult { name: string; lat: number; lng: number; }
+interface GeoResult { main: string; sub: string; full: string; kind: string; lat: number; lng: number; }
 interface NearestInfo { source: string; distanceM: number; }
 
-/** Depth -> color ramp (green shallow → red deep). */
 function depthColor(d: number): string {
   if (d >= 5) return "#b3402e";
   if (d >= 3) return "#c96a2e";
@@ -23,11 +26,43 @@ function depthColor(d: number): string {
   if (d >= 1.5) return "#8fa32e";
   return "#2e7d5b";
 }
+function depthLabel(d: number): string {
+  if (d >= 5) return "Deep dip";
+  if (d >= 3) return "Moderate dip";
+  if (d >= 2) return "Shallow dip";
+  return "Very shallow dip";
+}
+
+/** Tiny inline icon set — no emoji, no external icon lib weight. */
+const Icon = {
+  pin: "M12 21s-7-6.1-7-11a7 7 0 1 1 14 0c0 4.9-7 11-7 11z M12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+  home: "M3 10.5 12 3l9 7.5 M5 9.5V21h14V9.5",
+  road: "M6 3v18 M18 3v18 M12 5v2m0 4v2m0 4v2",
+  tree: "M12 3l5 7h-3l4 6H6l4-6H7l5-7z M12 16v5",
+  water: "M12 3c3 4.5 5.5 7.6 5.5 10.5a5.5 5.5 0 1 1-11 0C6.5 10.6 9 7.5 12 3z",
+  building: "M4 21V5l8-2v18 M12 21h8V9l-8-3 M7 8h1M7 12h1M7 16h1M16 12h1M16 16h1",
+};
+
+function KindIcon({ kind }: { kind: string }) {
+  const d =
+    kind.includes("house") || kind.includes("residential") ? Icon.home :
+    kind.includes("road") ? Icon.road :
+    kind.includes("park") || kind.includes("forest") ? Icon.tree :
+    kind.includes("water") || kind.includes("river") ? Icon.water :
+    Icon.building;
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="#716b60" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={d} />
+    </svg>
+  );
+}
 
 export default function MapView() {
   const mapDiv = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ hillshade: true, karst: true, springs: false });
@@ -38,20 +73,18 @@ export default function MapView() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [hasShape, setHasShape] = useState(false);
 
-  // Address search
+  // Predictive search
   const [query, setQuery] = useState("");
   const [geoResults, setGeoResults] = useState<GeoResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
 
-  // Selected dip popup
   const [selected, setSelected] = useState<Depression | null>(null);
-
-  // Nearest known sinkhole info for the scanned area center
   const [nearest, setNearest] = useState<NearestInfo[] | null>(null);
   const [nearestLoading, setNearestLoading] = useState(false);
 
   useEffect(() => {
-    // Service worker for tile caching.
     if ("serviceWorker" in navigator && location.protocol === "https:") {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
@@ -64,59 +97,40 @@ export default function MapView() {
         version: 8,
         glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
         sources: {
-          basemap: {
-            type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-            tileSize: 256,
-            attribution: "© OpenStreetMap contributors",
-          },
-          terrainRgb: {
-            type: "raster", tiles: [TERRARIUM_TILES], tileSize: 256, maxzoom: 15,
-            attribution: "Elevation: USGS / NASA via AWS Open Data",
-          },
-          hillshadeDem: {
-            type: "raster-dem", tiles: [TERRARIUM_TILES], tileSize: 256,
-            maxzoom: 15, encoding: "terrarium",
-          },
+          basemap: { type: "raster", tiles: BASE_TILES, tileSize: 256,
+            attribution: "© OpenStreetMap contributors © CARTO" },
+          terrainRgb: { type: "raster", tiles: [TERRARIUM_TILES], tileSize: 256, maxzoom: 15,
+            attribution: "Elevation: USGS / NASA via AWS Open Data" },
+          hillshadeDem: { type: "raster-dem", tiles: [TERRARIUM_TILES], tileSize: 256,
+            maxzoom: 15, encoding: "terrarium" },
           karst: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           springs: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
         },
         layers: [
-          { id: "bg", type: "background", paint: { "background-color": "#dfe6df" } },
+          { id: "bg", type: "background", paint: { "background-color": "#eef0ea" } },
           { id: "basemap", type: "raster", source: "basemap" },
-          { id: "terrain", type: "raster", source: "terrainRgb", paint: { "raster-opacity": 0.2 } },
-          {
-            id: "hillshade", type: "hillshade", source: "hillshadeDem",
-            paint: { "hillshade-exaggeration": 0.35, "hillshade-shadow-color": "#5a564e" },
-          },
-          { id: "karst-fill", type: "fill", source: "karst", paint: { "fill-color": "#c98a2b", "fill-opacity": 0.18 } },
-          { id: "karst-line", type: "line", source: "karst", paint: { "line-color": "#b07a24", "line-width": 1 } },
-          {
-            id: "depressions-fill", type: "fill", source: "depressions",
-            paint: { "fill-opacity": 0.45, "fill-color": ["get", "color"] },
-          },
-          {
-            id: "depressions-line", type: "line", source: "depressions",
-            paint: { "line-width": 1.5, "line-color": ["get", "stroke"] },
-          },
-          {
-            id: "springs-circle", type: "circle", source: "springs",
-            paint: {
-              "circle-radius": 5,
-              "circle-color": "#3b7dd8",
-              "circle-stroke-color": "#fff",
-              "circle-stroke-width": 1,
-            },
+          { id: "terrain", type: "raster", source: "terrainRgb", paint: { "raster-opacity": 0.16 } },
+          { id: "hillshade", type: "hillshade", source: "hillshadeDem",
+            paint: { "hillshade-exaggeration": 0.3, "hillshade-shadow-color": "#6b665c" } },
+          { id: "karst-fill", type: "fill", source: "karst",
+            paint: { "fill-color": "#b07a24", "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.05, 0.13] } },
+          { id: "karst-line", type: "line", source: "karst",
+            paint: { "line-color": "#c49256", "line-width": 1, "line-dasharray": [2, 2] } },
+          { id: "depressions-fill", type: "fill", source: "depressions",
+            paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
+          { id: "depressions-line", type: "line", source: "depressions",
+            paint: { "line-width": 2, "line-color": ["get", "stroke"] } },
+          { id: "springs-circle", type: "circle", source: "springs",
             layout: { visibility: "none" },
-          },
+            paint: { "circle-radius": 5, "circle-color": "#3b7dd8",
+              "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } },
         ],
       },
       center: BLOOMINGTON,
       zoom: 12,
     });
 
-    // Custom locate control with real error messages.
     class LocateControl implements maplibregl.IControl {
       private btn!: HTMLButtonElement;
       onAdd() {
@@ -125,9 +139,9 @@ export default function MapView() {
         this.btn.setAttribute("aria-label", "Find my location");
         this.btn.title = "Find my location";
         this.btn.innerHTML =
-          `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#26241f" stroke-width="2">` +
-          `<circle cx="12" cy="12" r="3.5"/><circle cx="12" cy="12" r="8" opacity="0.5"/></svg>`;
-        this.btn.style.cssText = "width:29px;height:29px;display:flex;align-items:center;justify-content:center;background:#fff;border:none;cursor:pointer;";
+          `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#23211c" stroke-width="2" stroke-linecap="round">` +
+          `<circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>`;
+        this.btn.style.cssText = "width:30px;height:30px;display:flex;align-items:center;justify-content:center;";
         this.btn.addEventListener("click", () => this.locate());
         const c = document.createElement("div");
         c.className = "maplibregl-ctrl maplibregl-ctrl-group";
@@ -148,13 +162,12 @@ export default function MapView() {
           },
           (err) => {
             this.btn.style.opacity = "1";
-            const msg =
-              err.code === err.PERMISSION_DENIED
-                ? "Location is blocked for this site — allow it in your browser's address bar settings."
-                : err.code === err.POSITION_UNAVAILABLE
-                ? "Couldn't get your location right now. Try again or search your address instead."
-                : "Location request timed out. Try searching your address instead.";
-            window.dispatchEvent(new CustomEvent("kw-locate-error", { detail: msg }));
+            window.dispatchEvent(new CustomEvent("kw-locate-error", {
+              detail:
+                err.code === err.PERMISSION_DENIED
+                  ? "Location is blocked for this site — allow it in your browser's address bar settings."
+                  : "Couldn't get your location. Try searching your address instead.",
+            }));
           },
           { enableHighAccuracy: false, timeout: 10000 },
         );
@@ -189,7 +202,6 @@ export default function MapView() {
       fetch(`/api/karst?bbox=${COUNTY_BBOX}`)
         .then((r) => r.json())
         .then((gj) => {
-          // Split polygons and points into their two sources.
           const polys = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type !== "Point") };
           const points = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type === "Point") };
           (map.getSource("karst") as maplibregl.GeoJSONSource)?.setData(polys);
@@ -197,12 +209,10 @@ export default function MapView() {
         })
         .catch(() => {});
 
-      // Click a dip -> show its details.
       map.on("click", "depressions-fill", (e) => {
         const props = e.features?.[0]?.properties;
         if (!props || props.index === undefined) return;
-        const dep = resultsRef.current[Number(props.index)];
-        if (dep) setSelected(dep);
+        setSelected(resultsRef.current[Number(props.index)] ?? null);
       });
       map.on("mouseenter", "depressions-fill", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "depressions-fill", () => { map.getCanvas().style.cursor = ""; });
@@ -211,17 +221,13 @@ export default function MapView() {
     });
 
     mapRef.current = map;
-    return () => {
-      map.remove();
-      mapRef.current = null;
-    };
+    return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // Keep latest results reachable inside map event handlers.
   const resultsRef = useRef<Depression[]>([]);
   useEffect(() => { resultsRef.current = results ?? []; }, [results]);
 
-  // Shareable links: ?bbox=w,s,e,n triggers an auto-scan on first load.
+  // Deep-link auto scan
   const bootstrapped = useRef(false);
   useEffect(() => {
     if (!ready || bootstrapped.current) return;
@@ -239,6 +245,17 @@ export default function MapView() {
     const onErr = (e: Event) => setError((e as CustomEvent<string>).detail);
     window.addEventListener("kw-locate-error", onErr);
     return () => window.removeEventListener("kw-locate-error", onErr);
+  }, []);
+
+  // Dismiss predictive dropdown on outside click.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
   }, []);
 
   const toggle = (key: LayerKey) => {
@@ -266,11 +283,8 @@ export default function MapView() {
       const r = await fetch(`/api/nearest?lat=${lat}&lng=${lng}`);
       const d = await r.json();
       setNearest(d.nearest ?? null);
-    } catch {
-      setNearest(null);
-    } finally {
-      setNearestLoading(false);
-    }
+    } catch { setNearest(null); }
+    finally { setNearestLoading(false); }
   };
 
   const runScanWith = async (bbox: [number, number, number, number]) => {
@@ -281,7 +295,6 @@ export default function MapView() {
       setResults(deps);
       resultsRef.current = deps;
       setScanBbox(bbox);
-      // Update URL so the view is shareable.
       const q = new URLSearchParams({ bbox: bbox.map((n) => n.toFixed(5)).join(",") });
       window.history.replaceState({}, "", `/?${q}`);
 
@@ -304,8 +317,11 @@ export default function MapView() {
       if (deps.length === 0) {
         setError("Good news — no sinkhole-shaped dips found in this spot.");
       } else {
-        const cLat = (bbox[1] + bbox[3]) / 2, cLng = (bbox[0] + bbox[2]) / 2;
-        loadNearest(cLat, cLng);
+        loadNearest((bbox[1]+bbox[3])/2, (bbox[0]+bbox[2])/2);
+        mapRef.current?.fitBounds(
+          [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+          { padding: { top: 40, bottom: 80, left: 60, right: 60 }, duration: 900 },
+        );
       }
     } catch (e) {
       setError(`The elevation data didn't load. Usually temporary — try again. (${(e as Error).message})`);
@@ -339,26 +355,27 @@ export default function MapView() {
     await runScanWith(bbox);
   };
 
-  const runSearch = async () => {
-    const q = query.trim();
-    if (q.length < 3) return;
-    setSearching(true); setGeoResults([]);
-    try {
-      const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
-      const d = await r.json();
-      setGeoResults(d.results ?? []);
-      if ((d.results ?? []).length === 0) setError(`No matches found for “${q}”.`);
-      else setError(null);
-    } catch {
-      setError("Address search is temporarily unavailable.");
-    } finally {
-      setSearching(false);
-    }
+  /** Predictive search: fires debounced as the user types. */
+  const onQueryChange = (value: string) => {
+    setQuery(value);
+    setSearchOpen(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const q = value.trim();
+    if (q.length < 3) { setGeoResults([]); setSearching(false); return; }
+    setSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+        const d = await r.json();
+        setGeoResults(d.results ?? []);
+      } catch { setGeoResults([]); }
+      finally { setSearching(false); }
+    }, 300);
   };
 
   const goTo = (r: GeoResult) => {
     mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 14, duration: 1400 });
-    setGeoResults([]); setQuery("");
+    setGeoResults([]); setQuery(r.main); setSearchOpen(false);
   };
 
   const copyLink = async () => {
@@ -371,41 +388,65 @@ export default function MapView() {
   };
 
   const step = scanning ? 3 : hasShape ? 2 : 1;
+  const showDropdown = searchOpen && geoResults.length > 0;
 
   return (
     <>
       <aside className={`
         z-10 flex flex-col bg-kw-bg
-        max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[55vh]
-        max-md:rounded-t-2xl max-md:border-t max-md:border-kw-line max-md:shadow-[0_-6px_24px_rgba(38,36,31,0.15)]
-        md:relative md:h-full md:w-[340px] md:border-r md:border-kw-line
-        p-5 overflow-y-auto order-2 md:order-1
+        max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[58vh]
+        max-md:rounded-t-[20px] max-md:border-t max-md:border-kw-line max-md:shadow-[0_-8px_32px_rgba(35,33,28,0.18)]
+        md:relative md:h-full md:w-[360px] md:border-r md:border-kw-line md:shadow-[4px_0_24px_rgba(35,33,28,0.04)]
+        p-5 overflow-y-auto kw-scroll order-2 md:order-1
       `}>
         <header>
-          <h1 className="text-xl font-bold tracking-tight text-kw-ink">KarstWatch</h1>
-          <p className="mt-0.5 text-sm text-kw-muted">Check land around Bloomington for sinkhole risk.</p>
+          <div className="flex items-center gap-2">
+            {/* Wordmark glyph */}
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M3 17c2.5-1 4-4 6.5-4s3.5 2 6 2 3.5-2 5.5-4" stroke="#2e7d5b" strokeWidth="2.4" strokeLinecap="round"/>
+              <path d="M3 20.5h18" stroke="#23211c" strokeWidth="2.4" strokeLinecap="round"/>
+              <circle cx="9.5" cy="7.5" r="2.6" fill="#b3402e" opacity=".85"/>
+            </svg>
+            <h1 className="text-xl font-extrabold tracking-tight text-kw-ink">KarstWatch</h1>
+          </div>
+          <p className="mt-1 text-sm text-kw-muted">
+            Is there a sinkhole under your land? Check any spot in Monroe County in seconds.
+          </p>
         </header>
 
-        {/* Address search */}
-        <div className="relative mt-4">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && runSearch()}
-            placeholder="Search an address…"
-            className="w-full rounded-lg border border-kw-line bg-white px-3 py-2 text-sm text-kw-ink placeholder:text-kw-muted focus:border-kw-accent focus:outline-none"
-          />
-          <button onClick={runSearch} disabled={searching || query.trim().length < 3}
-            className="absolute right-1 top-1 rounded-md px-2 py-1 text-xs font-semibold text-kw-accent hover:bg-kw-soft disabled:text-kw-muted">
-            {searching ? "…" : "Go"}
-          </button>
-          {geoResults.length > 0 && (
-            <ul className="absolute inset-x-0 top-full z-20 mt-1 divide-y divide-kw-line rounded-lg border border-kw-line bg-white shadow-lg">
-              {geoResults.slice(0, 5).map((r, i) => (
+        {/* Predictive address search */}
+        <div ref={searchBoxRef} className="relative mt-4">
+          <div className="relative">
+            <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" width="15" height="15"
+              viewBox="0 0 24 24" fill="none" stroke="#716b60" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              onFocus={() => setSearchOpen(true)}
+              placeholder="Type your address…"
+              autoComplete="off"
+              className="kw-input w-full rounded-xl border border-kw-line bg-white py-2.5 pl-9 pr-9 text-sm text-kw-ink placeholder:text-kw-muted/70"
+            />
+            {searching && (
+              <span className="kw-spinner absolute right-3 top-1/2 -translate-y-1/2" aria-label="searching" />
+            )}
+          </div>
+
+          {showDropdown && (
+            <ul role="listbox" className="kw-card kw-card--pop kw-animate-pop absolute inset-x-0 top-full z-20 mt-1.5 divide-y divide-kw-line overflow-hidden p-0">
+              {geoResults.slice(0, 6).map((r, i) => (
                 <li key={i}>
-                  <button className="w-full truncate px-3 py-2 text-left text-sm hover:bg-kw-soft"
-                    onClick={() => goTo(r)} title={r.name}>
-                    {r.name.split(",").slice(0, 3).join(",")}
+                  <button
+                    onClick={() => goTo(r)}
+                    className="kw-row flex w-full cursor-pointer items-start gap-2.5 px-3 py-2.5 text-left"
+                  >
+                    <span className="mt-0.5"><KindIcon kind={r.kind} /></span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold text-kw-ink">{r.main}</span>
+                      <span className="block truncate text-xs text-kw-muted">{r.sub}</span>
+                    </span>
                   </button>
                 </li>
               ))}
@@ -415,83 +456,86 @@ export default function MapView() {
 
         {/* Guided steps */}
         <ol className="mt-4 space-y-3">
-          <li className="flex items-start gap-2.5">
+          <li className="flex items-start gap-3">
             <span className={`kw-step-chip ${step===1?"kw-step-chip--active":step>1?"kw-step-chip--done":"kw-step-chip--idle"}`}>1</span>
-            <p className="text-sm leading-snug"><b>Find your spot.</b> <span className="text-kw-muted">Search above, drag the map, or tap ⌖ to jump to where you are.</span></p>
+            <p className="text-sm leading-snug"><b>Find your spot.</b> <span className="text-kw-muted">Search above, drag the map, or tap ⌖.</span></p>
           </li>
-          <li className="flex items-start gap-2.5">
+          <li className="flex items-start gap-3">
             <span className={`kw-step-chip ${step===2?"kw-step-chip--active":step>2?"kw-step-chip--done":"kw-step-chip--idle"}`}>2</span>
-            <p className="text-sm leading-snug"><b>Draw the area.</b> <span className="text-kw-muted">Use the polygon tool on the map, click around your property, double-click to finish.</span></p>
+            <p className="text-sm leading-snug"><b>Draw your area.</b> <span className="text-kw-muted">Polygon tool top-left of the map. Click points around the property, double-click to close.</span></p>
           </li>
-          <li className="flex items-start gap-2.5">
+          <li className="flex items-start gap-3">
             <span className={`kw-step-chip ${step===3?"kw-step-chip--active":"kw-step-chip--idle"}`}>3</span>
-            <p className="text-sm leading-snug"><b>Run the check.</b> <span className="text-kw-muted">We look for bowl-shaped dips in the ground.</span></p>
+            <p className="text-sm leading-snug"><b>Run the check.</b> <span className="text-kw-muted">We find bowl-shaped dips in the ground.</span></p>
           </li>
         </ol>
 
         <button onClick={startScan} disabled={!ready || scanning}
-          className="mt-4 w-full rounded-lg bg-kw-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">
-          {scanning ? "Checking…" : hasShape ? "Check this area" : "Check this area (draw first)"}
+          className="kw-cta mt-4 flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-white">
+          {scanning ? (
+            <>
+              <span className="kw-spinner" style={{ borderTopColor:"#fff", borderColor:"rgba(255,255,255,.35)" }} />
+              Reading elevation…
+            </>
+          ) : hasShape ? "Check this area →" : "Check this area — draw a box first"}
         </button>
 
-        {scanning && (
-          <div className="mt-3 flex items-center gap-2 text-xs text-kw-muted">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-kw-accent" />
-            Reading elevation data… usually takes a few seconds.
-          </div>
-        )}
-
         {error && (
-          <div role="status" className="mt-4 rounded-lg border border-kw-line bg-white px-3 py-2.5 text-sm text-kw-ink">{error}</div>
+          <div role="status" className="kw-card kw-animate-pop mt-4 flex items-start gap-2 px-3 py-2.5 text-sm text-kw-ink">
+            <span aria-hidden className="mt-0.5">{error.startsWith("Good news") || error.includes("copied") ? "✅" : "ℹ️"}</span>
+            <span>{error}</span>
+          </div>
         )}
 
         {/* Results */}
         {results && results.length > 0 && (
-          <section className="mt-4">
+          <section className="kw-animate-pop mt-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold">{results.length} dip{results.length===1?"":"s"} found</h2>
+              <h2 className="text-base font-bold">{results.length} dip{results.length===1?"":"s"} found</h2>
               <div className="flex gap-3">
                 {scanBbox && (
-                  <button onClick={copyLink} className="text-xs font-medium text-kw-accent underline-offset-2 hover:underline">Share</button>
+                  <button onClick={copyLink} className="rounded-md bg-kw-accent-soft px-2 py-1 text-xs font-semibold text-kw-accent hover:brightness-95">Share</button>
                 )}
                 <button onClick={clearScan} className="text-xs font-medium text-kw-muted underline-offset-2 hover:text-kw-ink hover:underline">Clear</button>
               </div>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-kw-muted">
-              Colored by depth: <span className="font-medium text-kw-accent">shallow</span> →{" "}
-              <span className="font-medium text-yellow-700">moderate</span> →{" "}
-              <span className="font-medium text-red-800">deep</span>. Tap any result or shape for details.
+              Colored by depth —{" "}
+              <span className="font-semibold" style={{ color:"#2e7d5b" }}>shallow</span> ·{" "}
+              <span className="font-semibold" style={{ color:"#c9962b" }}>moderate</span> ·{" "}
+              <span className="font-semibold" style={{ color:"#b3402e" }}>deep</span>. Tap one for details.
             </p>
 
+            {nearestLoading && (
+              <div className="kw-card mt-3 flex items-center gap-2 p-3 text-xs text-kw-muted">
+                <span className="kw-dot-live h-2 w-2 rounded-full bg-kw-accent" />
+                Checking state karst records…
+              </div>
+            )}
             {nearest && nearest.length > 0 && (
-              <div className="mt-3 rounded-lg border border-kw-line bg-white p-3 text-xs leading-relaxed">
-                <p className="font-medium text-kw-ink">Known karst nearby:</p>
+              <div className="kw-card mt-3 border-l-[3px] border-l-kw-accent p-3 text-xs leading-relaxed">
+                <p className="font-bold text-kw-ink">State records nearby</p>
                 {nearest.map((n, i) => (
-                  <p key={i} className="text-kw-muted mt-0.5">
-                    {n.source.replace(/_/g, " ").toLowerCase()} mapped within ~{Math.max(30, n.distanceM)} m of this area&apos;s center
+                  <p key={i} className="mt-0.5 text-kw-muted">
+                    {n.source.replace(/_/g, " ").toLowerCase()} mapped ~{Math.max(30, n.distanceM)} m from this area&apos;s center
                   </p>
                 ))}
               </div>
             )}
-            {nearestLoading && <p className="mt-2 text-xs text-kw-muted">Checking state karst records…</p>}
 
-            <ul className="mt-3 max-h-64 divide-y divide-kw-line overflow-y-auto rounded-lg border border-kw-line bg-white">
+            <ul className="kw-card kw-scroll mt-3 max-h-64 divide-y divide-kw-line overflow-y-auto">
               {results.slice(0, 50).map((d, i) => (
                 <li key={i}>
                   <button
-                    className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left hover:bg-kw-soft/60"
-                    onClick={() => {
-                      setSelected(d);
-                      mapRef.current?.fitBounds(d.bounds, { padding: 80 });
-                    }}
+                    className={`kw-row flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left ${selected===d?"bg-kw-soft":""}`}
+                    onClick={() => { setSelected(d); mapRef.current?.fitBounds(d.bounds, { padding: 80 }); }}
                   >
-                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: depthColor(d.depthM) }} />
-                    <span className="text-sm font-medium">
-                      {d.depthM >= 3 ? "Deep dip" : d.depthM >= 2 ? "Moderate dip" : d.depthM >= 1.5 ? "Shallow dip" : "Very shallow dip"}{" "}
-                      <span className="font-mono text-xs text-kw-muted">
-                        · {d.depthM.toFixed(1)} m · {(d.areaM2 / 4046.86).toFixed(2)} ac
-                      </span>
+                    <span className="h-3 w-3 shrink-0 rounded-full ring-2 ring-white" style={{ background: depthColor(d.depthM), boxShadow:`0 0 0 1px ${depthColor(d.depthM)}55` }} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold">{depthLabel(d.depthM)}</span>
+                      <span className="block font-mono text-[11px] text-kw-muted">{d.depthM.toFixed(1)} m deep · {(d.areaM2 / 4046.86).toFixed(2)} acres</span>
                     </span>
+                    <span aria-hidden className="text-kw-muted">›</span>
                   </button>
                 </li>
               ))}
@@ -499,38 +543,35 @@ export default function MapView() {
           </section>
         )}
 
-        {/* Selected dip detail card */}
+        {/* Detail card */}
         {selected && (
-          <section className="mt-4 rounded-lg border border-kw-line bg-white p-3">
+          <section className="kw-card kw-card--pop kw-animate-pop mt-4 p-4">
             <div className="flex items-start justify-between">
-              <h3 className="text-sm font-semibold">
-                <span className="mr-1.5 inline-block h-3 w-3 rounded-full align-middle" style={{ background: depthColor(selected.depthM) }} />
-                Dip details
+              <h3 className="flex items-center gap-2 text-sm font-bold">
+                <span className="h-3 w-3 rounded-full ring-2 ring-white" style={{ background: depthColor(selected.depthM), boxShadow:`0 0 0 1px ${depthColor(selected.depthM)}55` }} />
+                {depthLabel(selected.depthM)}
               </h3>
-              <button onClick={() => setSelected(null)} className="text-kw-muted hover:text-kw-ink" aria-label="Close">×</button>
+              <button onClick={() => setSelected(null)} className="-mr-1 -mt-1 rounded-md px-1.5 text-lg leading-none text-kw-muted hover:bg-kw-soft hover:text-kw-ink" aria-label="Close">×</button>
             </div>
-            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-              <dt className="text-kw-muted">Depth</dt><dd>{selected.depthM.toFixed(1)} meters</dd>
-              <dt className="text-kw-muted">Area</dt><dd>{(selected.areaM2 / 4046.86).toFixed(2)} acres</dd>
-              <dt className="text-kw-muted">Center</dt>
-              <dd className="font-mono">
-                {((( selected.bounds[0][1]+selected.bounds[1][1])/2)).toFixed(5)}, {(((selected.bounds[0][0]+selected.bounds[1][0])/2)).toFixed(5)}
-              </dd>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+              <dt className="font-medium text-kw-muted">Depth</dt><dd className="font-semibold">{selected.depthM.toFixed(1)} meters</dd>
+              <dt className="font-medium text-kw-muted">Area</dt><dd className="font-semibold">{(selected.areaM2 / 4046.86).toFixed(2)} acres</dd>
+              <dt className="font-medium text-kw-muted">Center</dt><dd className="font-mono">{((( selected.bounds[0][1]+selected.bounds[1][1])/2)).toFixed(5)}, {(((selected.bounds[0][0]+selected.bounds[1][0])/2)).toFixed(5)}</dd>
             </dl>
-            <p className="mt-2 text-[11px] leading-relaxed text-kw-muted">
-              Model output from elevation data — not a confirmed sinkhole. A geologist or drilling survey confirms what this suggests.
+            <p className="mt-3 rounded-lg bg-kw-bg px-2.5 py-2 text-[11px] leading-relaxed text-kw-muted">
+              Detected from elevation math — not a confirmed sinkhole. For anything that matters, ask a licensed geologist.
             </p>
           </section>
         )}
 
-        {/* Advanced */}
+        {/* Advanced + disclaimer */}
         <div className="pt-5">
           <button onClick={() => setShowAdvanced((s) => !s)} aria-expanded={showAdvanced}
             className="text-xs font-medium text-kw-muted underline-offset-2 hover:text-kw-ink hover:underline">
-            {showAdvanced ? "Hide map details" : "Show map details"}
+            {showAdvanced ? "Hide map layers & info" : "Map layers & info"}
           </button>
           {showAdvanced && (
-            <div className="mt-2 space-y-2 rounded-lg border border-kw-line bg-white p-3">
+            <div className="kw-card mt-2 space-y-2 p-3">
               {([
                 ["hillshade", "Shaded terrain"],
                 ["karst", "Known sinkhole areas (state survey)"],
@@ -542,21 +583,10 @@ export default function MapView() {
                 </label>
               ))}
               <InSARPanel bbox={scanBbox ?? [-86.85, 38.95, -86.25, 39.45]} />
-
-              {/* Disclaimer */}
               <details className="rounded-lg border border-kw-line bg-kw-bg p-3 text-xs leading-relaxed text-kw-muted">
                 <summary className="cursor-pointer font-medium text-kw-ink">About &amp; limitations</summary>
-                <p className="mt-2">
-                  KarstWatch is an educational tool built entirely on free public data:
-                  elevation from USGS/NASA (via AWS Open Data), karst mapping from the Indiana
-                  Geological &amp; Water Survey, addresses from OpenStreetMap.
-                </p>
-                <p className="mt-2">
-                  <b className="text-kw-ink">This is not a geological survey.</b> Detected dips are
-                  mathematical shapes in elevation data. Some are sinkholes; many are not
-                  (quarries, ponds, ditches, data noise). Never buy, dig, drill, or build based
-                  on this tool alone — consult a licensed geologist for anything that matters.
-                </p>
+                <p className="mt-2">KarstWatch is educational and built entirely on free public data: elevation from USGS/NASA (AWS Open Data), karst maps from the Indiana Geological &amp; Water Survey, addresses from OpenStreetMap.</p>
+                <p className="mt-2"><b className="text-kw-ink">This is not a geological survey.</b> Dips are shapes in elevation data — some are sinkholes, many aren&apos;t. Never buy, dig, drill, or build based on this alone.</p>
               </details>
             </div>
           )}
