@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import { scanBboxForDepressions, type Depression } from "@/lib/depression";
 import InSARPanel from "@/components/InSARPanel";
 
@@ -11,7 +10,8 @@ const COUNTY_BBOX = "-87.0,39.0,-86.0,39.5";
 
 // Carto Positron: clean light basemap, free, no key. Far less visual noise
 // than raw OSM tiles, so our colored results pop.
-const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"];
+// Carto Positron @2x retina tiles: crisp on any display, free, no key.
+const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"];
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
@@ -69,7 +69,6 @@ function KindIcon({ kind }: { kind: string }) {
 export default function MapView() {
   const mapDiv = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const drawRef = useRef<MapboxDraw | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinRef = useRef<maplibregl.Marker | null>(null);
 
@@ -120,21 +119,22 @@ export default function MapView() {
         sources: {
           basemap: { type: "raster", tiles: BASE_TILES, tileSize: 256,
             attribution: "© OpenStreetMap contributors © CARTO" },
-          terrainRgb: { type: "raster", tiles: [TERRARIUM_TILES], tileSize: 256, maxzoom: 15,
-            attribution: "Elevation: USGS / NASA via AWS Open Data" },
           hillshadeDem: { type: "raster-dem", tiles: [TERRARIUM_TILES], tileSize: 256,
             maxzoom: 15, encoding: "terrarium" },
           karst: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           springs: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "draw-line": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "draw-verts": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "draw-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
         },
         layers: [
           { id: "bg", type: "background", paint: { "background-color": "#eef0ea" } },
           { id: "basemap", type: "raster", source: "basemap" },
-          { id: "terrain", type: "raster", source: "terrainRgb", paint: { "raster-opacity": 0.16 } },
           { id: "hillshade", type: "hillshade", source: "hillshadeDem",
-            paint: { "hillshade-exaggeration": 0.3, "hillshade-shadow-color": "#6b665c" } },
+            paint: { "hillshade-exaggeration": 0.22, "hillshade-shadow-color": "#8a857a",
+              "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#a8a294" } },
           { id: "karst-fill", type: "fill", source: "karst",
             paint: { "fill-color": "#b07a24", "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.05, 0.13] } },
           { id: "karst-line", type: "line", source: "karst",
@@ -156,6 +156,13 @@ export default function MapView() {
             layout: { visibility: "none" },
             paint: { "circle-radius": 5, "circle-color": "#3b7dd8",
               "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } },
+          { id: "draw-fill", type: "fill", source: "draw-fill",
+            paint: { "fill-color": "#2e7d5b", "fill-opacity": 0.08 } },
+          { id: "draw-line", type: "line", source: "draw-line",
+            paint: { "line-color": "#2e7d5b", "line-width": 2.5, "line-dasharray": [2, 1.5] } },
+          { id: "draw-verts", type: "circle", source: "draw-verts",
+            paint: { "circle-radius": 5.5, "circle-color": "#2e7d5b",
+              "circle-stroke-color": "#fff", "circle-stroke-width": 2 } },
         ],
       },
       center: BLOOMINGTON,
@@ -213,35 +220,78 @@ export default function MapView() {
     map.addControl(new LocateControl(), "bottom-right");
 
     map.on("load", () => {
-      const draw = new MapboxDraw({
-        displayControlsDefault: false,
-        controls: { polygon: true, trash: true },
-      });
-      map.addControl(draw as unknown as maplibregl.IControl, "top-left");
-      drawRef.current = draw;
+      // Custom polygon drawing (MapboxDraw is unreliable on MapLibre — clicks
+      // don't register points). We own the whole interaction: click to add
+      // vertices, click first point or double-click to close, Esc cancels.
+      const drawSrc = map.getSource("draw") as maplibregl.GeoJSONSource;
+      const drawState = { pts: [] as [number, number][], active: false };
 
-      map.on("draw.create", () => {
-        setDrawing(false);
-        const all = draw.getAll();
-        if (all.features.length > 1) {
-          const keep = all.features[all.features.length - 1].id;
-          for (const f of all.features) if (f.id !== keep) draw.delete(f.id as string);
+      const renderDraw = () => {
+        const pts = drawState.pts;
+        const line: GeoJSON.Feature = {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: [...pts, ...(pts.length > 2 ? [pts[0]] : [])] },
+        };
+        const verts: GeoJSON.FeatureCollection = {
+          type: "FeatureCollection",
+          features: pts.map((p) => ({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: p } })),
+        };
+        const fill: GeoJSON.Feature | null =
+          pts.length >= 3
+            ? { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[...pts, pts[0]]] } }
+            : null;
+        (map.getSource("draw-line") as maplibregl.GeoJSONSource)?.setData(line);
+        (map.getSource("draw-verts") as maplibregl.GeoJSONSource)?.setData(verts);
+        (map.getSource("draw-fill") as maplibregl.GeoJSONSource)?.setData(
+          fill ?? { type: "FeatureCollection", features: [] }
+        );
+      };
+
+      (map as unknown as { kwDraw: typeof drawState }).kwDraw = drawState;
+
+      map.on("click", (e) => {
+        if (!drawState.active) return;
+        const p: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+        // Click near the first point (with ≥3 pts) closes the shape.
+        if (drawState.pts.length >= 3) {
+          const [fx, fy] = drawState.pts[0];
+          const metersPerDeg = 111320 * Math.cos((fy * Math.PI) / 180);
+          const dist = Math.hypot((e.lngLat.lng - fx) * metersPerDeg, (e.lngLat.lat - fy) * 111320);
+          if (dist < 25) {
+            finishDraw();
+            return;
+          }
         }
-        setHasShape(true);
+        drawState.pts.push(p);
+        renderDraw();
       });
-      map.on("draw.modechange", (e) => {
-        setDrawing(e.mode === "draw_polygon");
-      });
-      map.on("draw.delete", () => setHasShape(false));
 
-      fetch(`/api/karst?bbox=${COUNTY_BBOX}`)
-        .then((r) => r.json())
-        .then((gj) => {
-          const polys = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type !== "Point") };
-          const points = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type === "Point") };
-          (map.getSource("karst") as maplibregl.GeoJSONSource)?.setData(polys);
-          (map.getSource("springs") as maplibregl.GeoJSONSource)?.setData(points);
-        })
+      map.on("dblclick", () => {
+        if (drawState.active && drawState.pts.length >= 3) finishDraw();
+      });
+
+      function finishDraw() {
+        if (drawState.pts.length >= 3) {
+          drawState.active = false;
+          setDrawing(false);
+          setHasShape(true);
+          renderDraw();
+        }
+      }
+
+      map.on("keyup", (e) => {
+        // Esc cancels an in-progress shape.
+        if (e.originalEvent?.key === "Escape" && drawState.active) {
+          drawState.pts = [];
+          drawState.active = false;
+          renderDraw();
+          setDrawing(false);
+        }
+      });
+
+      window.addEventListener("kw-finish-draw", finishDraw);
+
       fetch(`/api/karst?bbox=${COUNTY_BBOX}`)
         .then((r) => r.json())
         .then((gj) => {
@@ -396,20 +446,18 @@ export default function MapView() {
   };
 
   const startScan = async () => {
-    const draw = drawRef.current;
-    if (!draw) return;
+    const map = mapRef.current as (maplibregl.Map & { kwDraw?: { pts: [number, number][]; active: boolean } }) | null;
+    if (!map) return;
+    const pts = map.kwDraw?.pts ?? [];
     let bbox: [number, number, number, number];
     try {
-      const all = draw.getAll();
-      const feat = all.features.find((f) => f.geometry.type === "Polygon");
-      if (!feat) throw new Error("no-shape");
-      const coords = (feat.geometry as GeoJSON.Polygon).coordinates[0];
+      if (pts.length < 3) throw new Error("no-shape");
       bbox = [
-        Math.min(...coords.map((c) => c[0])), Math.min(...coords.map((c) => c[1])),
-        Math.max(...coords.map((c) => c[0])), Math.max(...coords.map((c) => c[1])),
+        Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])),
+        Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])),
       ];
     } catch {
-      setError("First draw a box on the map with the polygon tool.");
+      setError("First draw an area on the map — tap \"Draw area\", then click points around the property.");
       return;
     }
     const spanKm = Math.max(bbox[2]-bbox[0], bbox[3]-bbox[1]) * 85;
@@ -455,22 +503,35 @@ export default function MapView() {
   };
 
   const startDrawing = () => {
-    const draw = drawRef.current;
-    const map = mapRef.current;
-    if (!draw || !map || !ready) return;
-    // Clear any previous shape first so each draw starts fresh.
-    draw.deleteAll();
+    const map = mapRef.current as (maplibregl.Map & { kwDraw?: { pts: [number, number][]; active: boolean } }) | null;
+    if (!map || !ready) return;
+    const st = map.kwDraw;
+    if (!st) return;
+    // Fresh shape each time; keep the map interactive (no drag lock needed).
+    st.pts = [];
+    st.active = true;
     setHasShape(false);
     setSelected(null);
     setError(null);
-    draw.changeMode("draw_polygon");
-    // On mobile the sheet covers half the map — collapse focus to the canvas.
-    map.getCanvas().focus?.();
+    renderDrawReset(map);
+    setDrawing(true);
+  };
+
+  const renderDrawReset = (map: maplibregl.Map) => {
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    (map.getSource("draw-line") as maplibregl.GeoJSONSource)?.setData(empty);
+    (map.getSource("draw-verts") as maplibregl.GeoJSONSource)?.setData(empty);
+    (map.getSource("draw-fill") as maplibregl.GeoJSONSource)?.setData(empty);
   };
 
   const deleteShape = () => {
-    drawRef.current?.deleteAll();
+    const map = mapRef.current as (maplibregl.Map & { kwDraw?: { pts: [number, number][]; active: boolean } }) | null;
+    if (!map) return;
+    const st = map.kwDraw;
+    if (st) { st.pts = []; st.active = false; }
+    renderDrawReset(map);
     setHasShape(false);
+    setDrawing(false);
   };
 
   const copyLink = async () => {
@@ -681,6 +742,19 @@ export default function MapView() {
               <span className="font-semibold" style={{ color:"#c9962b" }}>moderate</span> ·{" "}
               <span className="font-semibold" style={{ color:"#b3402e" }}>deep</span>. Tap one for details.
             </p>
+
+            {/* What you're looking at — context so the numbers mean something */}
+            <details className="kw-card mt-3 p-3 text-xs leading-relaxed text-kw-muted" open>
+              <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-kw-ink">
+                What you're looking at
+              </summary>
+              <ul className="mt-2 space-y-1.5">
+                <li><b className="text-kw-ink">The shapes</b> are places where the land surface dips like a bowl — the classic shape of a sinkhole. They're detected by comparing the ground as-is to a "filled" version where every bowl is leveled in.</li>
+                <li><b className="text-kw-ink">Depth</b> is how far the bowl drops, measured from satellite elevation data. <b className="text-kw-ink">Acres</b> is the bowl's area at its rim.</li>
+                <li><b className="text-kw-ink">Resolution:</b> this scan reads the ground at roughly 10–30 m per step, so small features under ~15 m wide can be missed, and edges are approximate. Great for "should I look closer?" — not a property-line survey.</li>
+                <li><b className="text-kw-ink">A dip is not automatically a sinkhole.</b> Old ponds, drainage ditches, quarries, and grading all leave bowl shapes. Cross-check the state's mapped sinkhole areas (tan overlay) and springs (blue dots) below the map.</li>
+              </ul>
+            </details>
 
             {nearestLoading && (
               <div className="kw-card mt-3 flex items-center gap-2 p-3 text-xs text-kw-muted">
