@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Mulish, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import "maplibre-gl/dist/maplibre-gl.css";
-import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 
 const mulish = Mulish({ subsets: ["latin"], variable: "--font-mulish" });
 const plexMono = IBM_Plex_Mono({

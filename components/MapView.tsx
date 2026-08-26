@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import maplibregl from "maplibre-gl";
 import { scanBboxForDepressions, type Depression } from "@/lib/depression";
 import InSARPanel from "@/components/InSARPanel";
@@ -223,7 +224,6 @@ export default function MapView() {
       // Custom polygon drawing (MapboxDraw is unreliable on MapLibre — clicks
       // don't register points). We own the whole interaction: click to add
       // vertices, click first point or double-click to close, Esc cancels.
-      const drawSrc = map.getSource("draw") as maplibregl.GeoJSONSource;
       const drawState = { pts: [] as [number, number][], active: false };
 
       const renderDraw = () => {
@@ -804,7 +804,7 @@ export default function MapView() {
                     className="kw-row flex w-full cursor-pointer items-center gap-2.5 px-2.5 py-2 text-left"
                     onClick={() => runScanWith(h.bbox)}
                   >
-                    <span className="shrink-0 rounded-md bg-kw-amber/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">{h.dips} dip{h.dips === 1 ? "" : "s"}</span>
+                    <span className="shrink-0 rounded-md bg-kw-accent/15 px-1.5 py-0.5 text-[10px] font-bold text-kw-accent">{h.dips} dip{h.dips === 1 ? "" : "s"}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-kw-ink truncate">{h.label}</span>
                       <span className="block font-mono text-[11px] text-kw-muted">{new Date(h.date).toLocaleString([], { month:"short", day:"numeric" })} · avg {h.avgDepth.toFixed(1)} m</span>
@@ -862,6 +862,10 @@ export default function MapView() {
                 <p className="mt-2">KarstWatch is educational and built entirely on free public data: elevation from USGS/NASA (AWS Open Data), karst maps from the Indiana Geological &amp; Water Survey, addresses from OpenStreetMap.</p>
                 <p className="mt-2"><b className="text-kw-ink">This is not a geological survey.</b> Dips are shapes in elevation data — some are sinkholes, many aren&apos;t. Never buy, dig, drill, or build based on this alone.</p>
               </details>
+
+              <div className="mt-4 border-t border-kw-border pt-3 text-center">
+                <Link href="/about" className="text-xs text-kw-muted underline-offset-2 hover:text-kw-ink hover:underline">About · Methodology · Accuracy</Link>
+              </div>
             </div>
           )}
         </div>

@@ -7,6 +7,7 @@
  */
 import { inflateSync } from "node:zlib";
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 function decodePng(buf) {
   let pos = 8, w = 0, h = 0, colorType = 0;
@@ -173,7 +174,7 @@ for (let row = 0; row < nRows; row++) {
   }
 }
 
-writeFileSync("public/county-depressions.geojson", JSON.stringify({
+writeFileSync(join(process.cwd(), "public/county-depressions.geojson"), JSON.stringify({
   type:"FeatureCollection",
   features,
 }, null, 0));

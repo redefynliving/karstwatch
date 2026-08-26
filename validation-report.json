@@ -1,0 +1,88 @@
+{
+  "generated": "2026-08-26T23:28:37.272Z",
+  "boxes": [
+    {
+      "name": "karst-heavy (Lake Lemon area)",
+      "bbox": [
+        -86.46,
+        39.08,
+        -86.33,
+        39.2
+      ],
+      "inventoryPts": 2,
+      "inventorySource": "IGWS sinkhole inventory",
+      "dipsFound": 313,
+      "dipsPerKm2": 2.1,
+      "matchedToInventoryPct": 0,
+      "inventorySeenByScanPct": 0,
+      "within500m": 1,
+      "medianDistToInventoryM": 7081,
+      "deepestM": 4,
+      "medianDepthM": 1.4
+    },
+    {
+      "name": "karst-heavy (Harrodsburg/S. Bloomington)",
+      "bbox": [
+        -86.52,
+        38.99,
+        -86.4,
+        39.05
+      ],
+      "inventoryPts": 38,
+      "inventorySource": "IGWS sinkhole inventory",
+      "dipsFound": 143,
+      "dipsPerKm2": 2.1,
+      "matchedToInventoryPct": 7,
+      "inventorySeenByScanPct": 26,
+      "within500m": 29,
+      "medianDistToInventoryM": 1501,
+      "deepestM": 3,
+      "medianDepthM": 1.4
+    },
+    {
+      "name": "control (IU campus)",
+      "bbox": [
+        -86.53,
+        39.16,
+        -86.5,
+        39.18
+      ],
+      "inventoryPts": 0,
+      "inventorySource": "IGWS sinkhole inventory",
+      "dipsFound": 3,
+      "dipsPerKm2": 0.5,
+      "matchedToInventoryPct": 0,
+      "inventorySeenByScanPct": null,
+      "within500m": 0,
+      "medianDistToInventoryM": null,
+      "deepestM": 2.5,
+      "medianDepthM": 1.6
+    },
+    {
+      "name": "control (Lake Monroe)",
+      "bbox": [
+        -86.33,
+        39.02,
+        -86.27,
+        39.08
+      ],
+      "inventoryPts": 0,
+      "inventorySource": "IGWS sinkhole inventory",
+      "dipsFound": 22,
+      "dipsPerKm2": 0.6,
+      "matchedToInventoryPct": 0,
+      "inventorySeenByScanPct": null,
+      "within500m": 0,
+      "medianDistToInventoryM": null,
+      "deepestM": 2.4,
+      "medianDepthM": 1.3
+    }
+  ],
+  "summary": {
+    "totalDips": 481,
+    "totalInventoryPoints": 40,
+    "inventoryCoverageBoxes": 4,
+    "inventoryCoveragePct": 2,
+    "note": "Of KarstWatch dips within IGWS inventory coverage, ~2% fall within 200 m of a mapped sinkhole. (Inventory is itself incomplete — unmapped dips may be genuine.) For boxes outside inventory coverage, scoring compares against karst-zone polygons and is more lenient."
+  }
+}
