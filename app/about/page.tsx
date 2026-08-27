@@ -78,6 +78,35 @@ export default function AboutPage() {
       </section>
 
       <section className="mb-8">
+        <h2 className="mb-2 text-lg font-bold">Confidence & filtering</h2>
+        <p className="mb-3">
+          Every detected depression now gets a <b>confidence classification</b> based
+          on its shape — specifically, how closely it matches the circular bowl
+          pattern of a true solution-subsidence sinkhole:
+        </p>
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="border-b border-kw-border text-left">
+              <th className="py-1.5">Confidence</th>
+              <th className="py-1.5">Circularity</th>
+              <th className="py-1.5">What it means</th>
+            </tr>
+          </thead>
+          <tbody className="text-kw-muted">
+            <tr className="border-b border-kw-border/30"><td className="py-1.5">Likely</td><td>≥ 0.6</td><td className="text-kw-ink">Round, bowl-shaped — classic sinkhole profile. Highest priority.</td></tr>
+            <tr className="border-b border-kw-border/30"><td className="py-1.5">Uncertain</td><td>0.3–0.6</td><td className="text-kw-ink">Moderate shape — could be a sinkhole or natural depression. Verify.</td></tr>
+            <tr className="border-b border-kw-border/30"><td className="py-1.5">Low</td><td>≤ 0.3</td><td className="text-kw-ink">Irregular, elongated — likely bedrock hollow, old quarry, or drainage. Low priority.</td></tr>
+          </tbody>
+        </table>
+        <p className="mt-3">
+          Results are <b>color-coded by depth</b> and <b>badge-filterable</b> — use
+          the filter tabs to focus on likely sinkholes, or switch to "uncertain" to
+          cast a wider net. Export to PDF to share the full breakdown including
+          circularity and confidence for every dip.
+        </p>
+      </section>
+
+      <section className="mb-8">
         <h2 className="mb-2 text-lg font-bold">Privacy & cost</h2>
         <p>
           Everything runs in your browser. Your drawn shape never touches a server.
