@@ -134,6 +134,7 @@ export default function MapView() {
           springs: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "county-risk": { type: "geojson", data: "/static/geo/county-risk.geojson" },
           "bedrock-karst": { type: "geojson", data: "/static/geo/bedrock-karst.geojson" },
           "caves": { type: "geojson", data: "/static/geo/caves-clustered.geojson" },
           "draw-line": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
@@ -158,6 +159,19 @@ export default function MapView() {
               "circle-stroke-color": "#fff", "circle-stroke-width": 0.5,
               "circle-stroke-opacity": 0.7, "circle-opacity": 0.8,
             },
+          },
+          { id: "county-risk-circles", type: "circle", source: "county-risk",
+            paint: {
+              "circle-radius": ["interpolate", ["linear"], ["get", "risk_score"], 0, 5, 0.4, 8, 0.7, 13, 1, 18],
+              "circle-color": ["interpolate", ["linear"], ["get", "risk_score"],
+                0, "#e8f5e9", 0.2, "#a5d6a7", 0.4, "#ffd54f", 0.7, "#ff6b35", 1, "#c62828"],
+              "circle-stroke-color": "#fff", "circle-stroke-width": 1,
+              "circle-opacity": 0.85, "circle-stroke-opacity": 0.9,
+            },
+          },
+          { id: "county-risk-label", type: "symbol", source: "county-risk",
+            layout: { "text-field": ["get", "county"], "text-font": ["Open Sans Regular"], "text-size": 9, "text-allow-overlap": false },
+            paint: { "text-color": "#3e2723", "text-halo-color": "#fff", "text-halo-width": 1 },
           },
           { id: "depressions-fill", type: "fill", source: "depressions",
             paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
@@ -400,7 +414,11 @@ export default function MapView() {
       mapRef.current.setLayoutProperty("karst-line", "visibility", vis);
     }
     if (key === "springs") mapRef.current.setLayoutProperty("springs-circle", "visibility", vis);
-    if (key === "countyHeat") mapRef.current.setLayoutProperty("county-circles", "visibility", vis);
+    if (key === "countyHeat") {
+      mapRef.current.setLayoutProperty("county-circles", "visibility", vis);
+      mapRef.current.setLayoutProperty("county-risk-circles", "visibility", vis);
+      mapRef.current.setLayoutProperty("county-risk-label", "visibility", vis);
+    }
     if (key === "bedrockKarst") {
       mapRef.current.setLayoutProperty("bedrock-karst-fill", "visibility", vis);
       mapRef.current.setLayoutProperty("bedrock-karst-line", "visibility", vis);
@@ -1070,7 +1088,7 @@ export default function MapView() {
                 ["bedrockKarst", "Limestone/dolomite bedrock (karst potential)"],
                 ["caves", "Cave entrances / sinkhole clusters"],
                 ["springs", "Mapped springs"],
-                ["countyHeat", "County-wide dips (heat view)"],
+                ["countyHeat", "County risk heatmap (92 counties + Monroe dips)"],
               ] as [LayerKey, string][]).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={layers[key]} onChange={() => toggle(key)} className="accent-kw-accent" disabled={!ready} />
