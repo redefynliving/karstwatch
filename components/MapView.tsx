@@ -18,7 +18,7 @@ const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
-type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst";
+type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst" | "caves";
 interface GeoResult { main: string; sub: string; full: string; kind: string; lat: number; lng: number; }
 interface NearestInfo { source: string; distanceM: number; }
 interface HistoryItem {
@@ -78,6 +78,7 @@ export default function MapView() {
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     countyHeat: true, hillshade: true, karst: true, springs: false, bedrockKarst: false,
+    caves: false,
   });
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [pins, setPins] = useState<HistoryItem[]>([]);
@@ -134,6 +135,7 @@ export default function MapView() {
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "bedrock-karst": { type: "geojson", data: "/static/geo/bedrock-karst.geojson" },
+          "caves": { type: "geojson", data: "/static/geo/caves-clustered.geojson" },
           "draw-line": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "draw-verts": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "draw-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
@@ -172,6 +174,20 @@ export default function MapView() {
             layout: { visibility: "none" },
             paint: { "line-color": "#ff6b35", "line-width": 1.5,
               "line-opacity": 0.8, "line-dasharray": [3, 1] } },
+          { id: "caves-circles", type: "circle", source: "caves",
+            layout: { visibility: "none" },
+            paint: {
+              "circle-radius": ["step", ["get", "count"], 6, 50, 10, 100, 14, 200, 18],
+              "circle-color": "#7c3aed", "circle-stroke-color": "#fff",
+              "circle-stroke-width": 1, "circle-opacity": 0.85,
+            },
+          },
+          { id: "caves-label", type: "symbol", source: "caves",
+            layout: { visibility: "none", "text-field": ["get", "count"],
+              "text-font": ["Open Sans Regular"], "text-size": 11 },
+            paint: { "text-color": "#fff", "text-halo-color": "#7c3aed",
+              "text-halo-width": 0.8 },
+          },
           { id: "draw-fill", type: "fill", source: "draw-fill",
             paint: { "fill-color": "#2e7d5b", "fill-opacity": 0.08 } },
           { id: "draw-line", type: "line", source: "draw-line",
@@ -389,6 +405,10 @@ export default function MapView() {
       mapRef.current.setLayoutProperty("bedrock-karst-fill", "visibility", vis);
       mapRef.current.setLayoutProperty("bedrock-karst-line", "visibility", vis);
     }
+    if (key === "caves") {
+      mapRef.current.setLayoutProperty("caves-circles", "visibility", vis);
+      mapRef.current.setLayoutProperty("caves-label", "visibility", vis);
+    }
   };
 
   const clearScan = () => {
@@ -410,15 +430,16 @@ export default function MapView() {
 
   const computeRiskScore = async (deps: Depression[], bbox: [number, number, number, number]) => {
     try {
-      // Fetch karst zone polygons + bedrock geology for risk scoring.
-      const [karstRes, bedrockRes] = await Promise.all([
+      // Fetch karst zone polygons + bedrock geology + cave clusters for risk scoring.
+      const [karstRes, bedrockRes, cavesRes] = await Promise.all([
         fetch("/api/karst").then(r => r.json()),
         fetch("/static/geo/bedrock-karst.geojson").then(r => r.json()),
+        fetch("/static/geo/caves-clustered.geojson").then(r => r.json()),
       ]);
       const karstZones = (karstRes?.features ?? []) as any[];
       const bedrockKarst = (bedrockRes?.features ?? []) as any[];
-
-      const result = scoreRisk(deps, bbox, karstZones, bedrockKarst, null, null);
+      const knownCaves = (cavesRes?.features ?? []) as any[];
+      const result = scoreRisk(deps, bbox, karstZones, bedrockKarst, null, knownCaves);
       setRiskResult(result);
     } catch (e) {
       // Risk scoring is best-effort — don't block the scan on it.
@@ -1047,6 +1068,7 @@ export default function MapView() {
                 ["hillshade", "Shaded terrain"],
                 ["karst", "Known sinkhole areas (state survey)"],
                 ["bedrockKarst", "Limestone/dolomite bedrock (karst potential)"],
+                ["caves", "Cave entrances / sinkhole clusters"],
                 ["springs", "Mapped springs"],
                 ["countyHeat", "County-wide dips (heat view)"],
               ] as [LayerKey, string][]).map(([key, label]) => (

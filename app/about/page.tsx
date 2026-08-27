@@ -39,6 +39,18 @@ export default function AboutPage() {
             limestone and dolomite formations highlighted as "karst potential" zones. Toggle
             under Map layers &amp; info.
           </li>
+          <li>
+            <b className="text-kw-ink">Sinkhole clusters / cave entrances:</b> IGWS Sinkhole
+            Inventory (154,889 points) clustered to 11 karst-density hotspots for Monroe County —
+            shown as purple pin clusters with counts. Toggle "Cave entrances / sinkhole clusters"
+            under Map layers &amp; info.
+          </li>
+          <li>
+            <b className="text-kw-ink">Risk scoring:</b> After each scan, KarstWatch Pro computes a
+            composite risk score (Low/Medium/High/Critical) based on dip density, average depth,
+            karst zone overlap, bedrock lithology, and proximity to known sinkholes and cave
+            entrances. The score and recommendation appear in the results panel and PDF export.
+          </li>
         </ul>
       </section>
 
