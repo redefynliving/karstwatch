@@ -12,6 +12,9 @@ export interface Depression {
   depthM: number;
   areaM2: number;
   centroid: [number, number];
+  circularity: number;    // 0→1, 1=perfect circle
+  perimeterM: number;     // perimeter in meters
+  confidence: "likely" | "uncertain" | "low";
 }
 
 const GRID = 384;          // analysis grid (square)
@@ -299,12 +302,40 @@ export async function scanBboxForDepressions(
       if(c3<latMin)latMin=c3;if(c3>latMax)latMax=c3;
     }
 
+    // Perimeter in meters (sum of segment lengths).
+    let perimeterM = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const [a, b] = coords[i - 1];
+      const [c, d] = coords[i];
+      const mx = (c - a) * 111320 * Math.cos(((latMin + latMax) / 2) * Math.PI / 180);
+      const my = (d - b) * 111010;
+      perimeterM += Math.hypot(mx, my);
+    }
+
+    // Circularity: 4π × Area / Perimeter² — 1.0 = perfect circle, 0.79 = square.
+    const circularity = perimeterM > 0 ? (4 * Math.PI * areaM2) / (perimeterM * perimeterM) : 0;
+
+    // Confidence classification: combine circularity, depth, and area.
+    // Real sinkholes tend to be deeper AND more circular relative to their area.
+    const sizeFactor = Math.min(1, areaM2 / 2000);        // bigger = more likely real
+    const depthFactor = Math.min(1, maxDepth / 5);         // deeper = more likely real
+    const circFactor = Math.max(0, Math.min(1, (circularity - 0.3) / 0.5)); // >0.3 = decent
+
+    let confidence: "likely" | "uncertain" | "low";
+    const score = circFactor * 0.4 + sizeFactor * 0.3 + depthFactor * 0.3;
+    if (score >= 0.6) confidence = "likely";
+    else if (score >= 0.35) confidence = "uncertain";
+    else confidence = "low";
+
     out.push({
       polygon:{type:"Polygon",coordinates:[coords]},
       bounds:[[lngMin,latMin],[lngMax,latMax]],
       depthM:maxDepth,
       areaM2,
       centroid:[(lngMin+lngMax)/2, (latMin+latMax)/2],
+      circularity,
+      perimeterM,
+      confidence,
     });
   }
 

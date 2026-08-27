@@ -87,6 +87,7 @@ export default function MapView() {
   const [hasShape, setHasShape] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const [neighborhoodScan, setNeighborhoodScan] = useState(false);
+  const [confidenceFilter, setConfidenceFilter] = useState<"all" | "likely" | "uncertain">("all");
 
   // Predictive search
   const [query, setQuery] = useState("");
@@ -752,8 +753,14 @@ export default function MapView() {
         {results && results.length > 0 && (
           <section className="kw-animate-pop mt-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold">{results.length} dip{results.length===1?"":"s"} found</h2>
-              <div className="flex gap-3">
+              <h2 className="text-base font-bold">
+                {results.length} dip{results.length===1?"":"s"} found
+                {confidenceFilter !== "all" && ` (${results.filter(d => d.confidence === confidenceFilter).length} ${confidenceFilter})`}
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={() => setConfidenceFilter("all")} className={`text-xs font-medium px-2.5 py-1 rounded-md ${confidenceFilter === "all" ? "bg-kw-emerald text-white" : "text-kw-muted hover:text-kw-ink hover:bg-kw-soft"}`}>All</button>
+                <button onClick={() => setConfidenceFilter("likely")} className={`text-xs font-medium px-2.5 py-1 rounded-md ${confidenceFilter === "likely" ? "bg-green-700 text-white" : "text-kw-muted hover:text-kw-ink hover:bg-kw-soft"}`}>Likely</button>
+                <button onClick={() => setConfidenceFilter("uncertain")} className={`text-xs font-medium px-2.5 py-1 rounded-md ${confidenceFilter === "uncertain" ? "bg-amber-700 text-white" : "text-kw-muted hover:text-kw-ink hover:bg-kw-soft"}`}>Check</button>
                 {scanBbox && (
                   <button onClick={copyLink} className="rounded-md bg-kw-accent-soft px-2 py-1 text-xs font-semibold text-kw-accent hover:brightness-95">Share</button>
                 )}
@@ -798,7 +805,10 @@ export default function MapView() {
             )}
 
             <ul className="kw-card kw-scroll mt-3 max-h-64 divide-y divide-kw-line overflow-y-auto">
-              {results.slice(0, 50).map((d, i) => (
+              {results
+                .filter(d => confidenceFilter === "all" || d.confidence === confidenceFilter)
+                .slice(0, 50)
+                .map((d, i) => (
                 <li key={i}>
                   <button
                     className={`kw-row flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left ${selected===d?"bg-kw-soft":""}`}
@@ -806,8 +816,12 @@ export default function MapView() {
                   >
                     <span className="h-3 w-3 shrink-0 rounded-full ring-2 ring-white" style={{ background: depthColor(d.depthM), boxShadow:`0 0 0 1px ${depthColor(d.depthM)}55` }} />
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold">{depthLabel(d.depthM)}</span>
-                      <span className="block font-mono text-[11px] text-kw-muted">{d.depthM.toFixed(1)} m deep · {(d.areaM2 / 4046.86).toFixed(2)} acres</span>
+                      <span className="block text-sm font-semibold">
+                        {depthLabel(d.depthM)}
+                        {d.confidence === "likely" && <span className="ml-1.5 inline-flex items-center gap-1 rounded bg-green-100 px-1.5 py-0.5 text-[9px] font-bold text-green-800">Sinkhole likely</span>}
+                        {d.confidence === "uncertain" && <span className="ml-1.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">Uncertain</span>}
+                      </span>
+                      <span className="block font-mono text-[11px] text-kw-muted">{d.depthM.toFixed(1)} m deep · {(d.areaM2 / 4046.86).toFixed(2)} acres · circ {d.circularity.toFixed(1)}</span>
                     </span>
                     <span aria-hidden className="text-kw-muted">›</span>
                   </button>
@@ -905,6 +919,12 @@ export default function MapView() {
             <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
               <dt className="font-medium text-kw-muted">Depth</dt><dd className="font-semibold">{selected.depthM.toFixed(1)} meters</dd>
               <dt className="font-medium text-kw-muted">Area</dt><dd className="font-semibold">{(selected.areaM2 / 4046.86).toFixed(2)} acres</dd>
+              <dt className="font-medium text-kw-muted">Confidence</dt><dd className="font-semibold">
+                {selected.confidence === "likely" && <span className="text-green-700">Sinkhole likely</span>}
+                {selected.confidence === "uncertain" && <span className="text-amber-700">Uncertain - needs field check</span>}
+                {selected.confidence === "low" && <span className="text-kw-muted">Natural depression</span>}
+              </dd>
+              <dt className="font-medium text-kw-muted">Circularity</dt><dd className="font-mono">{selected.circularity.toFixed(2)} (1.0 = perfect circle)</dd>
               <dt className="font-medium text-kw-muted">Center</dt><dd className="font-mono">{((( selected.bounds[0][1]+selected.bounds[1][1])/2)).toFixed(5)}, {(((selected.bounds[0][0]+selected.bounds[1][0])/2)).toFixed(5)}</dd>
             </dl>
             <p className="mt-3 rounded-lg bg-kw-bg px-2.5 py-2 text-[11px] leading-relaxed text-kw-muted">
@@ -934,12 +954,13 @@ export default function MapView() {
 
   <h2>Summary</h2>
   <p>Total dips detected: <b>${results?.length ?? 1}</b></p>
+  <p>Likely sinkholes: <b>${results?.filter(r => r.confidence === "likely").length ?? 0}</b> · Uncertain: <b>${results?.filter(r => r.confidence === "uncertain").length ?? 0}</b> · Natural depressions: <b>${results?.filter(r => r.confidence === "low").length ?? 0}</b></p>
   ${results ? `<p>Deepest: <b>${Math.max(...results.map(r => r.depthM)).toFixed(1)} m</b> · Largest: <b>${(Math.max(...results.map(r => r.areaM2)) / 4046.86).toFixed(2)} acres</b></p>` : `<p>Selected dip: <b>${selected.depthM.toFixed(1)} m deep</b> · ${(selected.areaM2 / 4046.86).toFixed(2)} acres</p>`}
 
   <h2>Details</h2>
   <table>
-    <tr><th>#</th><th>Depth (m)</th><th>Area (acres)</th><th>Center (lat, lng)</th></tr>
-    ${results ? results.map((d, i) => `<tr><td>${i+1}</td><td>${d.depthM.toFixed(1)}</td><td>${(d.areaM2/4046.86).toFixed(2)}</td><td>${d.centroid[1].toFixed(5)}, ${d.centroid[0].toFixed(5)}</td></tr>`).join("") : ""}
+    <tr><th>#</th><th>Depth (m)</th><th>Area (acres)</th><th>Confidence</th><th>Circularity</th><th>Center (lat, lng)</th></tr>
+    ${results ? results.map((d, i) => `<tr><td>${i+1}</td><td>${d.depthM.toFixed(1)}</td><td>${(d.areaM2/4046.86).toFixed(2)}</td><td>${d.confidence}</td><td>${d.circularity.toFixed(2)}</td><td>${d.centroid[1].toFixed(5)}, ${d.centroid[0].toFixed(5)}</td></tr>`).join("") : ""}
   </table>
 
   <div class="footer">
