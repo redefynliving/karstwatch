@@ -16,7 +16,7 @@ const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
-type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs";
+type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst";
 interface GeoResult { main: string; sub: string; full: string; kind: string; lat: number; lng: number; }
 interface NearestInfo { source: string; distanceM: number; }
 interface HistoryItem {
@@ -75,7 +75,7 @@ export default function MapView() {
 
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
-    countyHeat: true, hillshade: true, karst: true, springs: false,
+    countyHeat: true, hillshade: true, karst: true, springs: false, bedrockKarst: false,
   });
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [pins, setPins] = useState<HistoryItem[]>([]);
@@ -130,6 +130,7 @@ export default function MapView() {
           springs: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "bedrock-karst": { type: "geojson", data: "/static/geo/bedrock-karst.geojson" },
           "draw-line": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "draw-verts": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "draw-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
@@ -161,6 +162,13 @@ export default function MapView() {
             layout: { visibility: "none" },
             paint: { "circle-radius": 5, "circle-color": "#3b7dd8",
               "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } },
+          { id: "bedrock-karst-fill", type: "fill", source: "bedrock-karst",
+            layout: { visibility: "none" },
+            paint: { "fill-color": "#ff6b35", "fill-opacity": 0.15 } },
+          { id: "bedrock-karst-line", type: "line", source: "bedrock-karst",
+            layout: { visibility: "none" },
+            paint: { "line-color": "#ff6b35", "line-width": 1.5,
+              "line-opacity": 0.8, "line-dasharray": [3, 1] } },
           { id: "draw-fill", type: "fill", source: "draw-fill",
             paint: { "fill-color": "#2e7d5b", "fill-opacity": 0.08 } },
           { id: "draw-line", type: "line", source: "draw-line",
@@ -374,6 +382,10 @@ export default function MapView() {
     }
     if (key === "springs") mapRef.current.setLayoutProperty("springs-circle", "visibility", vis);
     if (key === "countyHeat") mapRef.current.setLayoutProperty("county-circles", "visibility", vis);
+    if (key === "bedrockKarst") {
+      mapRef.current.setLayoutProperty("bedrock-karst-fill", "visibility", vis);
+      mapRef.current.setLayoutProperty("bedrock-karst-line", "visibility", vis);
+    }
   };
 
   const clearScan = () => {
@@ -1007,6 +1019,7 @@ export default function MapView() {
               {([
                 ["hillshade", "Shaded terrain"],
                 ["karst", "Known sinkhole areas (state survey)"],
+                ["bedrockKarst", "Limestone/dolomite bedrock (karst potential)"],
                 ["springs", "Mapped springs"],
                 ["countyHeat", "County-wide dips (heat view)"],
               ] as [LayerKey, string][]).map(([key, label]) => (
