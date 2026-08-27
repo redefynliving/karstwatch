@@ -11,6 +11,7 @@ export interface Depression {
   bounds: [[number, number], [number, number]];
   depthM: number;
   areaM2: number;
+  centroid: [number, number];
 }
 
 const GRID = 384;          // analysis grid (square)
@@ -303,6 +304,7 @@ export async function scanBboxForDepressions(
       bounds:[[lngMin,latMin],[lngMax,latMax]],
       depthM:maxDepth,
       areaM2,
+      centroid:[(lngMin+lngMax)/2, (latMin+latMax)/2],
     });
   }
 

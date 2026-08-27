@@ -78,6 +78,7 @@ export default function MapView() {
     countyHeat: true, hillshade: true, karst: true, springs: false,
   });
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [pins, setPins] = useState<HistoryItem[]>([]);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Depression[] | null>(null);
@@ -85,6 +86,7 @@ export default function MapView() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [hasShape, setHasShape] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [neighborhoodScan, setNeighborhoodScan] = useState(false);
 
   // Predictive search
   const [query, setQuery] = useState("");
@@ -96,10 +98,11 @@ export default function MapView() {
   const [selected, setSelected] = useState<Depression | null>(null);
   const [geoLabel, setGeoLabel] = useState<string | null>(null);
 
-  // Load scan history from localStorage on first mount.
+  // Load scan history + saved pins from localStorage on first mount.
   useEffect(() => {
     if (typeof window !== "undefined") {
       try { setHistory(JSON.parse(localStorage.getItem("kw-history") ?? "[]")); } catch {}
+      try { setPins(JSON.parse(localStorage.getItem("kw-pins") ?? "[]")); } catch {}
     }
   }, []);
   const [nearest, setNearest] = useState<NearestInfo[] | null>(null);
@@ -468,6 +471,22 @@ export default function MapView() {
     await runScanWith(bbox);
   };
 
+  // One-tap neighborhood scan: 1.5 km box centered on current map view.
+  const startNeighborhoodScan = async () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const center = map.getCenter();
+    // 1.5 km ≈ 0.0135 degrees at 39°N latitude.
+    const delta = 0.0135;
+    const bbox: [number, number, number, number] = [
+      center.lng - delta, center.lat - delta, center.lng + delta, center.lat + delta,
+    ];
+    // Clear any active draw.
+    (map as any).kwDraw = { pts: [], active: false };
+    setHasShape(false);
+    await runScanWith(bbox);
+  };
+
   /** Predictive search: fires debounced as the user types. */
   const onQueryChange = (value: string) => {
     setQuery(value);
@@ -698,6 +717,11 @@ export default function MapView() {
           ) : hasShape ? "Check this area →" : "Check this area"}
         </button>
 
+        <button onClick={startNeighborhoodScan} disabled={!ready || scanning}
+          className="mt-2 flex w-full items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-kw-emerald hover:bg-kw-soft">
+          <span aria-hidden>📍</span> Scan my neighborhood
+        </button>
+
         {error && (
           <div role="status" className="kw-card kw-animate-pop mt-4 flex items-start gap-2 px-3 py-2.5 text-sm text-kw-ink">
             <span aria-hidden className="mt-0.5">{error.startsWith("Good news") || error.includes("copied") ? "✅" : "ℹ️"}</span>
@@ -816,6 +840,34 @@ export default function MapView() {
           </section>
         )}
 
+        {/* Saved pins */}\
+        {pins.length > 0 && (
+          <section className="kw-card mt-4 p-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-kw-muted">Saved pins</h2>
+            <ul className="mt-2 space-y-1.5">
+              {pins.slice(0, 12).map((p) => (
+                <li key={p.id}>
+                  <button
+                    className="kw-row flex w-full cursor-pointer items-center gap-2.5 px-2.5 py-2 text-left"
+                    onClick={() => {
+                      mapRef.current?.fitBounds(
+                        [[p.bbox[0], p.bbox[1]], [p.bbox[2], p.bbox[3]]],
+                        { padding: 80, duration: 900 },
+                      );
+                    }}
+                  >
+                    <span className="shrink-0 text-base">📌</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-kw-ink truncate">{p.label}</span>
+                      <span className="block font-mono text-[11px] text-kw-muted">{new Date(p.date).toLocaleString([], { month: "short", day: "numeric" })}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {/* Detail card */}
         {selected && (
           <section className="kw-card kw-card--pop kw-animate-pop mt-4 p-4">
@@ -824,7 +876,31 @@ export default function MapView() {
                 <span className="h-3 w-3 rounded-full ring-2 ring-white" style={{ background: depthColor(selected.depthM), boxShadow:`0 0 0 1px ${depthColor(selected.depthM)}55` }} />
                 {depthLabel(selected.depthM)}
               </h3>
-              <button onClick={() => setSelected(null)} className="-mr-1 -mt-1 rounded-md px-1.5 text-lg leading-none text-kw-muted hover:bg-kw-soft hover:text-kw-ink" aria-label="Close">×</button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    const c = selected.centroid;
+                    const label = geoLabel ?? `${c[0].toFixed(3)}, ${c[1].toFixed(3)}`;
+                    const item: HistoryItem = {
+                      id: crypto.randomUUID(),
+                      label,
+                      bbox: [selected.bounds[0][0], selected.bounds[0][1], selected.bounds[1][0], selected.bounds[1][1]],
+                      date: Date.now(),
+                      dips: 1,
+                      avgDepth: selected.depthM,
+                    };
+                    const prev: HistoryItem[] = JSON.parse(localStorage.getItem("kw-pins") ?? "[]");
+                    const next = [item, ...prev].slice(0, 50);
+                    localStorage.setItem("kw-pins", JSON.stringify(next));
+                    setPins(next);
+                  }}
+                  className="rounded-md p-1.5 text-xs text-kw-muted hover:bg-kw-soft hover:text-kw-ink"
+                  title="Save this pin"
+                >
+                  📌
+                </button>
+                <button onClick={() => setSelected(null)} className="-mr-1 -mt-1 rounded-md px-1.5 text-lg leading-none text-kw-muted hover:bg-kw-soft hover:text-kw-ink" aria-label="Close">×</button>
+              </div>
             </div>
             <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
               <dt className="font-medium text-kw-muted">Depth</dt><dd className="font-semibold">{selected.depthM.toFixed(1)} meters</dd>

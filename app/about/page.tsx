@@ -14,8 +14,9 @@ export default function AboutPage() {
         <h2 className="mb-2 text-lg font-bold">Data sources</h2>
         <ul className="space-y-1">
           <li>
-            <b className="text-kw-ink">Elevation:</b> AWS Open Data "elevation-tiles-prod"
-            — USGS 3DEP, ~10 m resolution. We read the red-green-blue pixels from
+            <b className="text-kw-ink">Elevation:</b> AWS Open Data "elevation-tiles-prod" —
+            USGS 3DEP, read at zoom 15 for ~4.7 m resolution (falls back to ~10 m
+            at zoom 13 for larger areas). We decode the red-green-blue pixels from
             the terrarium PNG tiles and turn them into ground heights with a
             priority-flood (fill-sinks) algorithm.
           </li>
@@ -69,7 +70,8 @@ export default function AboutPage() {
           than control areas, and most of those dips cluster near known karst.
         </p>
         <p className="mt-2">
-          <b>Resolution:</b>~10 m per pixel. Features under ~15 m wide can be missed.
+          <b>Resolution:</b> ~4.7 m per pixel (zoom 15) for small-to-medium areas,
+          ~10 m (zoom 13) for larger scans. Features under ~10 m wide can be missed.
           Edges are approximate. This is for <b>triage and curiosity</b> — if a dip
           looks concerning, hire a local geotechnical engineer for a site visit.
         </p>
