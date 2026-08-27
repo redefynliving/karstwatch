@@ -11,6 +11,7 @@
     "@mapbox/mapbox-gl-draw": "^1.4.3",
     "maplibre-gl": "^4.7.1",
     "next": "^14.2.15",
+    "proj4": "^2.21.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -10,7 +10,7 @@
  * Usage: node scripts/validate.mjs
  */
 import { inflateSync } from "node:zlib";
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 // ---------- PNG decode (terrarium) ----------

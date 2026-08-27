@@ -14,9 +14,10 @@ export interface Depression {
 }
 
 const GRID = 384;          // analysis grid (square)
-const SCAN_ZOOM = 13;      // terrarium zoom
+const SCAN_ZOOM = 15;     // terrarium zoom (HD: ~4.7 m; fallback: z13 ~10 m)
 const MIN_DEPTH_M = 1.0;   // ignore dips shallower than 1 m
 const MIN_AREA_M2 = 500;   // ~ a 4-car driveway
+const MAX_TILES = 256;     // hard cap on concurrent tile fetches
 
 // ---- geo helpers -----------------------------------------------------------
 
@@ -47,35 +48,54 @@ function decodeTerrarium(data: Uint8ClampedArray): Float32Array {
 
 // ---- tile fetch -------------------------------------------------------------
 
-async function fetchGrid(bbox: [number, number, number, number]): Promise<Float32Array> {
+interface GridResult {
+  dem: Float32Array;
+  zoom: number;
+}
+
+async function fetchGrid(bbox: [number, number, number, number]): Promise<GridResult> {
+  // Try high-resolution terrarium (z=15, ~4.7 m/pixel). If the area is too
+  // large for z15 (exceeds MAX_TILES), fall back to z=13 (~10 m).
+  try {
+    const dem = await fetchTerrariumGrid(bbox, 15);
+    return { dem, zoom: 15 };
+  } catch (e: any) {
+    if (e?.message?.includes("too large")) {
+      const dem = await fetchTerrariumGrid(bbox, 13);
+      return { dem, zoom: 13 };
+    }
+    throw e;
+  }
+}
+
+// Standard path — terrarium RGB tiles (z=15: ~4.7 m/pixel, z=13: ~10 m fallback).
+async function fetchTerrariumGrid(bbox: [number, number, number, number], zoom?: number): Promise<Float32Array> {
   const [minLng, minLat, maxLng, maxLat] = bbox;
-  const z = SCAN_ZOOM;
+  const z = zoom ?? SCAN_ZOOM;
   const x0 = Math.floor(lngToTileX(minLng, z));
   const x1 = Math.floor(lngToTileX(maxLng, z));
   const y0 = Math.floor(latToTileY(maxLat, z));
   const y1 = Math.floor(latToTileY(minLat, z));
 
-  if ((x1-x0+1)*(y1-y0+1) > 64) throw new Error("Area too large — shrink the box.");
+  const tileCount = (x1 - x0 + 1) * (y1 - y0 + 1);
+  if (tileCount > MAX_TILES) throw new Error(`Area too large at z${z} — ${tileCount} tiles.`);
 
   const tiles = await Promise.all(
-    Array.from({ length: (y1-y0+1)*(x1-x0+1) }, (_, k) => {
-      const tx = x0 + (k % (x1-x0+1));
-      const ty = y0 + Math.floor(k / (x1-x0+1));
-      return fetch(
-        `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${tx}/${ty}.png`,
-        { mode: "cors" },
-      )
+    Array.from({ length: (y1 - y0 + 1) * (x1 - x0 + 1) }, (_, k) => {
+      const tx = x0 + (k % (x1 - x0 + 1));
+      const ty = y0 + Math.floor(k / (x1 - x0 + 1));
+      return fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${tx}/${ty}.png`, { mode: "cors" })
         .then((r) => { if (!r.ok) throw new Error(`tile ${tx},${ty} HTTP ${r.status}`); return r.blob(); })
         .then((b) => createImageBitmap(b))
         .then((img) => ({ tx, ty, img }));
     }),
   );
 
-  const tw = (x1-x0+1)*256, th = (y1-y0+1)*256;
+  const tw = (x1 - x0 + 1) * 256, th = (y1 - y0 + 1) * 256;
   const canvas = document.createElement("canvas");
   canvas.width = tw; canvas.height = th;
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-  for (const t of tiles) ctx.drawImage(t.img, (t.tx-x0)*256, (t.ty-y0)*256);
+  for (const t of tiles) ctx.drawImage(t.img, (t.tx - x0) * 256, (t.ty - y0) * 256);
   const fullDem = decodeTerrarium(ctx.getImageData(0, 0, tw, th).data);
 
   const tXmin = lngToTileX(minLng, z), tXmax = lngToTileX(maxLng, z);
@@ -83,15 +103,16 @@ async function fetchGrid(bbox: [number, number, number, number]): Promise<Float3
   const dem = new Float32Array(GRID * GRID);
   for (let gy = 0; gy < GRID; gy++) {
     for (let gx = 0; gx < GRID; gx++) {
-      const tx = tXmin + ((gx+0.5)/GRID) * (tXmax-tXmin);
-      const ty = tYmin + ((gy+0.5)/GRID) * (tYmax-tYmin);
-      const px = Math.min(tw-1, Math.max(0, Math.floor((tx-x0)*256)));
-      const py = Math.min(th-1, Math.max(0, Math.floor((ty-y0)*256)));
-      dem[gy*GRID+gx] = fullDem[py*tw+px];
+      const tx = tXmin + ((gx + 0.5) / GRID) * (tXmax - tXmin);
+      const ty = tYmin + ((gy + 0.5) / GRID) * (tYmax - tYmin);
+      const px = Math.min(tw - 1, Math.max(0, Math.floor((tx - x0) * 256)));
+      const py = Math.min(th - 1, Math.max(0, Math.floor((ty - y0) * 256)));
+      dem[gy * GRID + gx] = fullDem[py * tw + px];
     }
   }
   return dem;
 }
+
 
 // ---- fill sinks (priority-flood, Barnes et al.) ------------------------------
 
@@ -203,6 +224,7 @@ export async function scanBboxForDepressions(
 ): Promise<Depression[]> {
   const dem = await fetchGrid(bbox);
   const w = GRID, h = GRID;
+  const z = dem.zoom;
 
   // 3x3 smoothing
   const smooth = new Float32Array(w*h);
@@ -211,7 +233,7 @@ export async function scanBboxForDepressions(
     for (const [dx,dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) {
       const nx=x+dx, ny=y+dy;
       if(nx<0||nx>=w||ny<0||ny>=h)continue;
-      sum+=dem[ny*w+nx]; n++;
+      sum+=dem.dem[ny*w+nx]; n++;
     }
     smooth[y*w+x]=sum/n;
   }
@@ -232,12 +254,12 @@ export async function scanBboxForDepressions(
   const out:Depression[]=[];
 
   const gridToLng=(gx:number)=>{
-    const t=lngToTileX(bbox[0],SCAN_ZOOM)+((gx)/GRID)*(lngToTileX(bbox[2],SCAN_ZOOM)-lngToTileX(bbox[0],SCAN_ZOOM));
-    return tileXToLng(t,SCAN_ZOOM);
+    const t=lngToTileX(bbox[0],z)+((gx)/GRID)*(lngToTileX(bbox[2],z)-lngToTileX(bbox[0],z));
+    return tileXToLng(t,z);
   };
   const gridToLat=(gy:number)=>{
-    const t=latToTileY(bbox[3],SCAN_ZOOM)+((gy)/GRID)*(latToTileY(bbox[1],SCAN_ZOOM)-latToTileY(bbox[3],SCAN_ZOOM));
-    return tileYToLat(t,SCAN_ZOOM);
+    const t=latToTileY(bbox[3],z)+((gy)/GRID)*(latToTileY(bbox[1],z)-latToTileY(bbox[3],z));
+    return tileYToLat(t,z);
   };
 
   for (let seed=0;seed<residual.length;seed++){

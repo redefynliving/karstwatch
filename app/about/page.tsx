@@ -20,9 +20,7 @@ export default function AboutPage() {
             priority-flood (fill-sinks) algorithm.
           </li>
           <li>
-            <b className="text-kw-ink">Verified sinkholes:</b> Indiana Geological &
-            Water survey <i>Sinkhole Inventory</i> (10,000+ mapped points) — shown as
-            amber dots you can toggle on.
+            <b className="text-kw-ink">Verified sinkholes:</b> Indiana Geological &amp; Water survey <i>Sinkhole Inventory</i> (155,000+ mapped points statewide — shown as amber dots you can toggle on).
           </li>
           <li>
             <b className="text-kw-ink">Mapped karst areas:</b> IGWS{" "}
