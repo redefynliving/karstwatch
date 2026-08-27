@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import maplibregl from "maplibre-gl";
 import { scanBboxForDepressions, type Depression } from "@/lib/depression";
+import { scoreRisk, type RiskResult } from "@/lib/risk";
 import InSARPanel from "@/components/InSARPanel";
+import RiskPanel from "@/components/RiskPanel";
 
 const BLOOMINGTON: [number, number] = [-86.5264, 39.1653];
 const COUNTY_BBOX = "-87.0,39.0,-86.0,39.5";
@@ -86,6 +88,7 @@ export default function MapView() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [hasShape, setHasShape] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
   const [neighborhoodScan, setNeighborhoodScan] = useState(false);
   const [confidenceFilter, setConfidenceFilter] = useState<"all" | "likely" | "uncertain">("all");
 
@@ -405,8 +408,27 @@ export default function MapView() {
     finally { setNearestLoading(false); }
   };
 
+  const computeRiskScore = async (deps: Depression[], bbox: [number, number, number, number]) => {
+    try {
+      // Fetch karst zone polygons + bedrock geology for risk scoring.
+      const [karstRes, bedrockRes] = await Promise.all([
+        fetch("/api/karst").then(r => r.json()),
+        fetch("/static/geo/bedrock-karst.geojson").then(r => r.json()),
+      ]);
+      const karstZones = (karstRes?.features ?? []) as any[];
+      const bedrockKarst = (bedrockRes?.features ?? []) as any[];
+
+      const result = scoreRisk(deps, bbox, karstZones, bedrockKarst, null, null);
+      setRiskResult(result);
+    } catch (e) {
+      // Risk scoring is best-effort — don't block the scan on it.
+      console.error("Risk scoring failed:", e);
+    }
+  };
+
   const runScanWith = async (bbox: [number, number, number, number]) => {
     setError(null); setResults(null); setSelected(null); setNearest(null);
+    setRiskResult(null);
     setScanning(true);
     try {
       const deps = await scanBboxForDepressions(bbox);
@@ -436,6 +458,8 @@ export default function MapView() {
         setError("Good news — no sinkhole-shaped dips found in this spot.");
       } else {
         loadNearest((bbox[1]+bbox[3])/2, (bbox[0]+bbox[2])/2);
+        // Score risk using karst zone overlap + bedrock lithology.
+        await computeRiskScore(deps, bbox);
         // Persist to scan history.
         const avgDepth = deps.reduce((a, d) => a + d.depthM, 0) / deps.length;
         const item: HistoryItem = {
@@ -816,6 +840,8 @@ export default function MapView() {
               </div>
             )}
 
+            <RiskPanel riskResult={riskResult} />
+
             <ul className="kw-card kw-scroll mt-3 max-h-64 divide-y divide-kw-line overflow-y-auto">
               {results
                 .filter(d => confidenceFilter === "all" || d.confidence === confidenceFilter)
@@ -967,6 +993,7 @@ export default function MapView() {
   <h2>Summary</h2>
   <p>Total dips detected: <b>${results?.length ?? 1}</b></p>
   <p>Likely sinkholes: <b>${results?.filter(r => r.confidence === "likely").length ?? 0}</b> · Uncertain: <b>${results?.filter(r => r.confidence === "uncertain").length ?? 0}</b> · Natural depressions: <b>${results?.filter(r => r.confidence === "low").length ?? 0}</b></p>
+  ${riskResult ? `<p className="mt-2">Karst risk: <b>${riskResult.risk}</b> (score ${riskResult.score.toFixed(2)}) — ${riskResult.recommendation}</p>` : ""}
   ${results ? `<p>Deepest: <b>${Math.max(...results.map(r => r.depthM)).toFixed(1)} m</b> · Largest: <b>${(Math.max(...results.map(r => r.areaM2)) / 4046.86).toFixed(2)} acres</b></p>` : `<p>Selected dip: <b>${selected.depthM.toFixed(1)} m deep</b> · ${(selected.areaM2 / 4046.86).toFixed(2)} acres</p>`}
 
   <h2>Details</h2>

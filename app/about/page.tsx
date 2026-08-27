@@ -34,6 +34,11 @@ export default function AboutPage() {
             <b className="text-kw-ink">Basemap, hillshade, search:</b> CARTO, MapLibre,
             Nominatim — all free, no key.
           </li>
+          <li>
+            <b className="text-kw-ink">Bedrock geology:</b> IGS Regional Geologic Map (1:250K) —
+            limestone and dolomite formations highlighted as "karst potential" zones. Toggle
+            under Map layers &amp; info.
+          </li>
         </ul>
       </section>
 
