@@ -46,6 +46,13 @@ export default function AboutPage() {
             under Map layers &amp; info.
           </li>
           <li>
+            <b className="text-kw-ink">Soil erodibility:</b> USDA SSURGO via public SDA
+            (no key, no secret) — 62 Monroe mapunits with K-factor, clay %, hydrologic
+            group → septic-failure risk (HIGH/MODERATE/LOW). Toggle "Soil erodibility —
+            septic failure risk" to see green/orange/red dots. 15KB static cache
+            <code>ssurgo-monroe.geojson</code>.
+          </li>
+          <li>
             <b className="text-kw-ink">Risk scoring:</b> After each scan, KarstWatch Pro computes a
             composite risk score (Low/Medium/High/Critical) based on dip density, average depth,
             karst zone overlap, bedrock lithology, and proximity to known sinkholes and cave

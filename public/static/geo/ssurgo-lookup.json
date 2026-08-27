@@ -1,0 +1,312 @@
+{
+  "AfB": {
+    "kffact": 0.43,
+    "clay": 17,
+    "hydgrp": "B"
+  },
+  "AgrC": {
+    "kffact": 0.43,
+    "clay": 18,
+    "hydgrp": "C/D"
+  },
+  "Ba": {
+    "kffact": 0.49,
+    "clay": 14,
+    "hydgrp": "C/D"
+  },
+  "BcrAW": {
+    "kffact": 0.49,
+    "clay": 12,
+    "hydgrp": "B"
+  },
+  "BdB": {
+    "kffact": 0.43,
+    "clay": 17,
+    "hydgrp": "C/D"
+  },
+  "BkF": {
+    "kffact": 0.43,
+    "clay": 16,
+    "hydgrp": "C"
+  },
+  "Bo": {
+    "kffact": 0.49,
+    "clay": 18,
+    "hydgrp": "C/D"
+  },
+  "CaD": {
+    "kffact": 0.37,
+    "clay": 18,
+    "hydgrp": "C"
+  },
+  "Cb": {
+    "kffact": 0.37,
+    "clay": 18,
+    "hydgrp": "C"
+  },
+  "ChF": {
+    "kffact": 0.37,
+    "clay": 9,
+    "hydgrp": "B"
+  },
+  "CoF": {
+    "kffact": 0.32,
+    "clay": 24,
+    "hydgrp": "D"
+  },
+  "CrB": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "CrC": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "CrD": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "CsC": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "CtB": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "CtC": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "Cu": {
+    "kffact": 0.43,
+    "clay": 17,
+    "hydgrp": "B"
+  },
+  "EbE": {
+    "kffact": 0.37,
+    "clay": 16,
+    "hydgrp": "C"
+  },
+  "EdD": {
+    "kffact": 0.37,
+    "clay": 16,
+    "hydgrp": "C"
+  },
+  "EkB": {
+    "kffact": 0.49,
+    "clay": 14,
+    "hydgrp": "C"
+  },
+  "EkF": {
+    "kffact": 0.37,
+    "clay": 14,
+    "hydgrp": "B"
+  },
+  "GpD": {
+    "kffact": 0.37,
+    "clay": 15,
+    "hydgrp": "C"
+  },
+  "GrD": {
+    "kffact": 0.32,
+    "clay": 21,
+    "hydgrp": "C"
+  },
+  "HaC": {
+    "kffact": 0.37,
+    "clay": 20,
+    "hydgrp": "C"
+  },
+  "HaD": {
+    "kffact": 0.37,
+    "clay": 20,
+    "hydgrp": "C"
+  },
+  "HaE": {
+    "kffact": 0.43,
+    "clay": 20,
+    "hydgrp": "B"
+  },
+  "HbD3": {
+    "kffact": 0.43,
+    "clay": 28,
+    "hydgrp": "B"
+  },
+  "Hc": {
+    "kffact": 0.43,
+    "clay": 20,
+    "hydgrp": "B"
+  },
+  "Hd": {
+    "kffact": 0.43,
+    "clay": 15,
+    "hydgrp": "B"
+  },
+  "HkF": {
+    "kffact": 0.37,
+    "clay": 8,
+    "hydgrp": "B"
+  },
+  "HoA": {
+    "kffact": 0.43,
+    "clay": 15,
+    "hydgrp": "D"
+  },
+  "HoB": {
+    "kffact": 0.43,
+    "clay": 15,
+    "hydgrp": "D"
+  },
+  "HoC": {
+    "kffact": 0.43,
+    "clay": 15,
+    "hydgrp": "D"
+  },
+  "HtB": {
+    "kffact": 0.43,
+    "clay": 15,
+    "hydgrp": "D"
+  },
+  "IvA": {
+    "kffact": 0.49,
+    "clay": 13,
+    "hydgrp": "B/D"
+  },
+  "MbB": {
+    "kffact": 0.32,
+    "clay": 13,
+    "hydgrp": "B"
+  },
+  "PaB": {
+    "kffact": 0.43,
+    "clay": 22,
+    "hydgrp": "B"
+  },
+  "PaC": {
+    "kffact": 0.43,
+    "clay": 22,
+    "hydgrp": "B"
+  },
+  "PcD": {
+    "kffact": 0.43,
+    "clay": 22,
+    "hydgrp": "B"
+  },
+  "PeA": {
+    "kffact": 0.43,
+    "clay": 18,
+    "hydgrp": "C"
+  },
+  "PeB": {
+    "kffact": 0.43,
+    "clay": 18,
+    "hydgrp": "C/D"
+  },
+  "PeC": {
+    "kffact": 0.49,
+    "clay": 12,
+    "hydgrp": "C/D"
+  },
+  "Po": {
+    "kffact": 0.49,
+    "clay": 17,
+    "hydgrp": "C/D"
+  },
+  "PrC": {
+    "kffact": 0.43,
+    "clay": 9,
+    "hydgrp": "B"
+  },
+  "PrE": {
+    "kffact": 0.43,
+    "clay": 9,
+    "hydgrp": "B"
+  },
+  "RcB": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "RcC": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "RcD": {
+    "kffact": 0.43,
+    "clay": 19,
+    "hydgrp": "B"
+  },
+  "Sf": {
+    "kffact": 0.43,
+    "clay": 15,
+    "hydgrp": "B/D"
+  },
+  "St": {
+    "kffact": 0.43,
+    "clay": 16,
+    "hydgrp": "B/D"
+  },
+  "Sx": {
+    "kffact": 0.49,
+    "clay": 11,
+    "hydgrp": "B"
+  },
+  "TlA": {
+    "kffact": 0.43,
+    "clay": 18,
+    "hydgrp": "C/D"
+  },
+  "TlB": {
+    "kffact": 0.43,
+    "clay": 18,
+    "hydgrp": "C/D"
+  },
+  "Wa": {
+    "kffact": 0.43,
+    "clay": 15,
+    "hydgrp": "B/D"
+  },
+  "WeC": {
+    "kffact": 0.43,
+    "clay": 20,
+    "hydgrp": "B"
+  },
+  "Wo": {
+    "kffact": 0.37,
+    "clay": 14,
+    "hydgrp": "B/D"
+  },
+  "Wr": {
+    "kffact": 0.43,
+    "clay": 16,
+    "hydgrp": "B/D"
+  },
+  "WyqD": {
+    "kffact": 0.43,
+    "clay": 14,
+    "hydgrp": "C"
+  },
+  "Zo": {
+    "kffact": 0.32,
+    "clay": 35,
+    "hydgrp": "C/D"
+  },
+  "Zp": {
+    "kffact": 0.32,
+    "clay": 35,
+    "hydgrp": "D"
+  },
+  "Zs": {
+    "kffact": 0.43,
+    "clay": 24,
+    "hydgrp": "C/D"
+  }
+}

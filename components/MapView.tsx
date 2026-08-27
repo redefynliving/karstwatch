@@ -18,7 +18,7 @@ const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
-type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst" | "caves";
+type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst" | "caves" | "soil";
 interface GeoResult { main: string; sub: string; full: string; kind: string; lat: number; lng: number; }
 interface NearestInfo { source: string; distanceM: number; }
 interface HistoryItem {
@@ -78,7 +78,7 @@ export default function MapView() {
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     countyHeat: true, hillshade: true, karst: true, springs: false, bedrockKarst: false,
-    caves: false,
+    caves: false, soil: false,
   });
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [pins, setPins] = useState<HistoryItem[]>([]);
@@ -135,6 +135,7 @@ export default function MapView() {
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "county-risk": { type: "geojson", data: "/static/geo/county-risk.geojson" },
+          "soil": { type: "geojson", data: "/static/geo/ssurgo-monroe.geojson" },
           "bedrock-karst": { type: "geojson", data: "/static/geo/bedrock-karst.geojson" },
           "caves": { type: "geojson", data: "/static/geo/caves-clustered.geojson" },
           "draw-line": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
@@ -172,6 +173,17 @@ export default function MapView() {
           { id: "county-risk-label", type: "symbol", source: "county-risk",
             layout: { "text-field": ["get", "county"], "text-font": ["Open Sans Regular"], "text-size": 9, "text-allow-overlap": false },
             paint: { "text-color": "#3e2723", "text-halo-color": "#fff", "text-halo-width": 1 },
+          },
+          { id: "soil-circles", type: "circle", source: "soil",
+            layout: { visibility: "none" },
+            paint: {
+              "circle-radius": 6, "circle-stroke-color": "#fff", "circle-stroke-width": 0.8, "circle-opacity": 0.9,
+              "circle-color": ["match", ["get", "septic_risk"], "HIGH", "#c62828", "MODERATE", "#ff8f00", "LOW", "#7cb342", "#ccc"],
+            },
+          },
+          { id: "soil-label", type: "symbol", source: "soil",
+            layout: { visibility: "none", "text-field": ["get", "musym"], "text-font": ["Open Sans Regular"], "text-size": 8 },
+            paint: { "text-color": "#2e2e2e", "text-halo-color": "#fff", "text-halo-width": 0.8 },
           },
           { id: "depressions-fill", type: "fill", source: "depressions",
             paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
@@ -426,6 +438,10 @@ export default function MapView() {
     if (key === "caves") {
       mapRef.current.setLayoutProperty("caves-circles", "visibility", vis);
       mapRef.current.setLayoutProperty("caves-label", "visibility", vis);
+    }
+    if (key === "soil") {
+      mapRef.current.setLayoutProperty("soil-circles", "visibility", vis);
+      mapRef.current.setLayoutProperty("soil-label", "visibility", vis);
     }
   };
 
@@ -1087,6 +1103,7 @@ export default function MapView() {
                 ["karst", "Known sinkhole areas (state survey)"],
                 ["bedrockKarst", "Limestone/dolomite bedrock (karst potential)"],
                 ["caves", "Cave entrances / sinkhole clusters"],
+                ["soil", "Soil erodibility — septic failure risk (SSURGO, no key)"],
                 ["springs", "Mapped springs"],
                 ["countyHeat", "County risk heatmap (92 counties + Monroe dips)"],
               ] as [LayerKey, string][]).map(([key, label]) => (
