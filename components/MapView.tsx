@@ -8,6 +8,7 @@ import { scoreRisk, type RiskResult } from "@/lib/risk";
 import { scoreGroundwater, type GwResult } from "@/lib/groundwater";
 import InSARPanel from "@/components/InSARPanel";
 import RiskPanel from "@/components/RiskPanel";
+import ExportPanel from "@/components/ExportPanel";
 
 const BLOOMINGTON: [number, number] = [-86.5264, 39.1653];
 const COUNTY_BBOX = "-87.0,39.0,-86.0,39.5";
@@ -18,6 +19,25 @@ const COUNTY_BBOX = "-87.0,39.0,-86.0,39.5";
 const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"];
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+async function loadSpringsForCurrentBounds(map: maplibregl.Map) {
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+    .map((n) => n.toFixed(6))
+    .join(",");
+  try {
+    const r = await fetch(`/api/springs?bbox=${bbox}`);
+    const gj = await r.json();
+    (map.getSource("springs") as maplibregl.GeoJSONSource | undefined)?.setData(
+      gj && Array.isArray(gj.features) ? gj : EMPTY_FEATURE_COLLECTION
+    );
+  } catch {
+    (map.getSource("springs") as maplibregl.GeoJSONSource | undefined)?.setData(
+      EMPTY_FEATURE_COLLECTION
+    );
+  }
+}
 
 type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst" | "caves" | "soil" | "flood";
 interface GeoResult { main: string; sub: string; full: string; kind: string; lat: number; lng: number; }
@@ -74,6 +94,7 @@ export default function MapView() {
   const mapDiv = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const springsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinRef = useRef<maplibregl.Marker | null>(null);
 
   const [ready, setReady] = useState(false);
@@ -200,10 +221,10 @@ export default function MapView() {
             paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
           { id: "depressions-line", type: "line", source: "depressions",
             paint: { "line-width": 2, "line-color": ["get", "stroke"] } },
-          { id: "springs-circle", type: "circle", source: "springs",
+          { id: "springs-circles", type: "circle", source: "springs",
             layout: { visibility: "none" },
-            paint: { "circle-radius": 5, "circle-color": "#3b7dd8",
-              "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } },
+            paint: { "circle-radius": 5, "circle-color": "#0284c7",
+              "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } },
           { id: "bedrock-karst-fill", type: "fill", source: "bedrock-karst",
             layout: { visibility: "none" },
             paint: { "fill-color": "#ff6b35", "fill-opacity": 0.15 } },
@@ -236,6 +257,7 @@ export default function MapView() {
       },
       center: BLOOMINGTON,
       zoom: 12,
+      preserveDrawingBuffer: true,
     });
 
     class LocateControl implements maplibregl.IControl {
@@ -364,9 +386,7 @@ export default function MapView() {
         .then((r) => r.json())
         .then((gj) => {
           const polys = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type !== "Point") };
-          const points = { ...gj, features: gj.features.filter((f: GeoJSON.Feature) => f.geometry?.type === "Point") };
           (map.getSource("karst") as maplibregl.GeoJSONSource)?.setData(polys);
-          (map.getSource("springs") as maplibregl.GeoJSONSource)?.setData(points);
         })
         .catch(() => {});
 
@@ -385,12 +405,37 @@ export default function MapView() {
       });
       map.on("mouseenter", "depressions-fill", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "depressions-fill", () => { map.getCanvas().style.cursor = ""; });
+      map.on("click", "springs-circles", (e) => {
+        const props = e.features?.[0]?.properties as Record<string, unknown> | undefined;
+        const label = props?.NAME ?? props?.name ?? props?.SPG_83_ID ?? "Mapped spring";
+        new maplibregl.Popup()
+          .setLngLat(e.lngLat)
+          .setText(String(label))
+          .addTo(map);
+      });
+      map.on("mouseenter", "springs-circles", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "springs-circles", () => { map.getCanvas().style.cursor = ""; });
 
       setReady(true);
     });
 
+    const onMoveEnd = () => {
+      if (!mapRef.current) return;
+      if (mapRef.current.getLayoutProperty("springs-circles", "visibility") !== "visible") return;
+      if (springsDebounceRef.current) clearTimeout(springsDebounceRef.current);
+      springsDebounceRef.current = setTimeout(() => {
+        if (mapRef.current) void loadSpringsForCurrentBounds(mapRef.current);
+      }, 400);
+    };
+    map.on("moveend", onMoveEnd);
+
     mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; };
+    return () => {
+      if (springsDebounceRef.current) clearTimeout(springsDebounceRef.current);
+      map.off("moveend", onMoveEnd);
+      map.remove();
+      mapRef.current = null;
+    };
   }, []);
 
   const resultsRef = useRef<Depression[]>([]);
@@ -436,7 +481,10 @@ export default function MapView() {
       mapRef.current.setLayoutProperty("karst-fill", "visibility", vis);
       mapRef.current.setLayoutProperty("karst-line", "visibility", vis);
     }
-    if (key === "springs") mapRef.current.setLayoutProperty("springs-circle", "visibility", vis);
+    if (key === "springs") {
+      mapRef.current.setLayoutProperty("springs-circles", "visibility", vis);
+      if (vis === "visible") void loadSpringsForCurrentBounds(mapRef.current);
+    }
     if (key === "countyHeat") {
       mapRef.current.setLayoutProperty("county-circles", "visibility", vis);
       mapRef.current.setLayoutProperty("county-risk-circles", "visibility", vis);
@@ -937,6 +985,13 @@ export default function MapView() {
             )}
 
             <RiskPanel riskResult={riskResult} gwResult={gwResult} />
+            <ExportPanel
+              results={results}
+              riskResult={riskResult}
+              gwResult={gwResult}
+              areaLabel={geoLabel ?? null}
+              bbox={scanBbox ?? null}
+            />
 
             <ul className="kw-card kw-scroll mt-3 max-h-64 divide-y divide-kw-line overflow-y-auto">
               {results
