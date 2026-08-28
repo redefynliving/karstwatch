@@ -43,6 +43,17 @@ function pointInPolygon(lng: number, lat: number, polygon: number[][][]): boolea
   return inside;
 }
 
+/**
+ * Normalize a GeoJSON geometry to a list of outer rings so that both
+ * Polygon (coordinates[0] is the ring) and MultiPolygon (coordinates[i][0]
+ * is the ring of the i-th polygon) are handled correctly.
+ */
+function outerRings(geometry: { type: string; coordinates: any }): number[][][] {
+  if (geometry.type === "Polygon") return [geometry.coordinates[0]];
+  if (geometry.type === "MultiPolygon") return geometry.coordinates.map((poly: number[][][]) => poly[0]);
+  return [];
+}
+
 function distM(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -116,7 +127,7 @@ export function scoreRisk(
     const testPoints = gridSample(bbox, 50); // 50 sample points
     let hits = 0;
     for (const [lng, lat] of testPoints) {
-      if (karstZones.some(z => pointInPolygon(lng, lat, (z as any).geometry.coordinates[0]))) {
+      if (karstZones.some(z => outerRings(z.geometry).some(ring => pointInPolygon(lng, lat, [ring])))) {
         hits++;
       }
     }
@@ -128,7 +139,7 @@ export function scoreRisk(
   if (bedrockKarst && bedrockKarst.length > 0) {
     const testPoints = gridSample(bbox, 50);
     bedrockIsKarst = testPoints.some(([lng, lat]) =>
-      bedrockKarst.some(b => pointInPolygon(lng, lat, (b as any).geometry.coordinates[0]))
+      bedrockKarst.some(b => outerRings(b.geometry).some(ring => pointInPolygon(lng, lat, [ring])))
     );
   }
 
