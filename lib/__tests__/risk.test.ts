@@ -67,21 +67,21 @@ describe("scoreRisk — classifier partition", () => {
 
 describe("scoreRisk — monotonicity", () => {
   it("bedrockKarst=true never lowers score vs false", () => {
-    // A simple polygon that covers the bbox center so pointInPolygon hits
+    // A standard MultiPolygon that covers the bbox
     const [minLng, minLat, maxLng, maxLat] = bbox;
     const poly = {
       type: "Feature",
       geometry: {
-        type: "Polygon",
-        // scoreRisk reads: pointInPolygon(lng, lat, b.geometry.coordinates[0])
-        // and then does ring = polygon[0], so coordinates[0][0] must be the ring.
-        coordinates: [[[
-          [minLng - 1, minLat - 1],
-          [maxLng + 1, minLat - 1],
-          [maxLng + 1, maxLat + 1],
-          [minLng - 1, maxLat + 1],
-          [minLng - 1, minLat - 1],
-        ]]],
+        type: "MultiPolygon",
+        coordinates: [[
+          [
+            [minLng - 1, minLat - 1],
+            [maxLng + 1, minLat - 1],
+            [maxLng + 1, maxLat + 1],
+            [minLng - 1, maxLat + 1],
+            [minLng - 1, minLat - 1],
+          ],
+        ]],
       },
       properties: {},
     } as any;
@@ -115,5 +115,52 @@ describe("scoreRisk — determinism", () => {
     const r1 = scoreRisk(dips, bbox, null, null, null, null);
     const r2 = scoreRisk(dips, bbox, null, null, null, null);
     expect(r1).toEqual(r2);
+  });
+});
+
+describe("scoreRisk — Polygon geometry regression", () => {
+  const [minLng, minLat, maxLng, maxLat] = bbox;
+  const ring = [
+    [minLng - 1, minLat - 1],
+    [maxLng + 1, minLat - 1],
+    [maxLng + 1, maxLat + 1],
+    [minLng - 1, maxLat + 1],
+    [minLng - 1, minLat - 1],
+  ];
+
+  it("standard GeoJSON Polygon bedrockKarst raises score same as MultiPolygon", () => {
+    const polyGeo = {
+      type: "Feature",
+      geometry: { type: "Polygon", coordinates: [ring] },
+      properties: {},
+    } as any;
+    const multiGeo = {
+      type: "Feature",
+      geometry: { type: "MultiPolygon", coordinates: [[ring]] },
+      properties: {},
+    } as any;
+    const baseline = scoreRisk([], bbox, null, null, null, null);
+    const rPoly = scoreRisk([], bbox, null, [polyGeo], null, null);
+    const rMulti = scoreRisk([], bbox, null, [multiGeo], null, null);
+    expect(rPoly.score).toBeGreaterThanOrEqual(baseline.score);
+    expect(rPoly.score).toBe(rMulti.score);
+  });
+
+  it("standard GeoJSON Polygon karstZones raises score same as MultiPolygon", () => {
+    const polyGeo = {
+      type: "Feature",
+      geometry: { type: "Polygon", coordinates: [ring] },
+      properties: {},
+    } as any;
+    const multiGeo = {
+      type: "Feature",
+      geometry: { type: "MultiPolygon", coordinates: [[ring]] },
+      properties: {},
+    } as any;
+    const baseline = scoreRisk([], bbox, null, null, null, null);
+    const rPoly = scoreRisk([], bbox, [polyGeo], null, null, null);
+    const rMulti = scoreRisk([], bbox, [multiGeo], null, null, null);
+    expect(rPoly.score).toBeGreaterThanOrEqual(baseline.score);
+    expect(rPoly.score).toBe(rMulti.score);
   });
 });
