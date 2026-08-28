@@ -53,6 +53,12 @@ export default function AboutPage() {
             <code>ssurgo-monroe.geojson</code>.
           </li>
           <li>
+            <b className="text-kw-ink">FEMA floodplains:</b> Public ArcGIS
+            USA_Flood_Hazard_Reduced_Set (no key, no secret) — 8 high-risk 100yr
+            floodplains (AE/A) clipped to Monroe, simplified to 114KB.
+            Toggle "FEMA floodplains — 100yr". Blue fill + dashed outline.
+          </li>
+          <li>
             <b className="text-kw-ink">Risk scoring:</b> After each scan, KarstWatch Pro computes a
             composite risk score (Low/Medium/High/Critical) based on dip density, average depth,
             karst zone overlap, bedrock lithology, and proximity to known sinkholes and cave
