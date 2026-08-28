@@ -5,6 +5,7 @@ import Link from "next/link";
 import maplibregl from "maplibre-gl";
 import { scanBboxForDepressions, type Depression } from "@/lib/depression";
 import { scoreRisk, type RiskResult } from "@/lib/risk";
+import { scoreGroundwater, type GwResult } from "@/lib/groundwater";
 import InSARPanel from "@/components/InSARPanel";
 import RiskPanel from "@/components/RiskPanel";
 
@@ -90,6 +91,7 @@ export default function MapView() {
   const [hasShape, setHasShape] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
+  const [gwResult, setGwResult] = useState<GwResult | null>(null);
   const [neighborhoodScan, setNeighborhoodScan] = useState(false);
   const [confidenceFilter, setConfidenceFilter] = useState<"all" | "likely" | "uncertain">("all");
 
@@ -477,17 +479,43 @@ export default function MapView() {
 
   const computeRiskScore = async (deps: Depression[], bbox: [number, number, number, number]) => {
     try {
-      // Fetch karst zone polygons + bedrock geology + cave clusters for risk scoring.
-      const [karstRes, bedrockRes, cavesRes] = await Promise.all([
+      // Fetch karst zone polygons + bedrock geology + cave clusters + soil + flood for risk scoring.
+      const [karstRes, bedrockRes, cavesRes, soilRes, floodRes] = await Promise.all([
         fetch("/api/karst").then(r => r.json()),
         fetch("/static/geo/bedrock-karst.geojson").then(r => r.json()),
         fetch("/static/geo/caves-clustered.geojson").then(r => r.json()),
+        fetch("/static/geo/ssurgo-monroe.geojson").then(r => r.json()).catch(()=>({features:[]})),
+        fetch("/static/geo/fema-flood.geojson").then(r => r.json()).catch(()=>({features:[]})),
       ]);
       const karstZones = (karstRes?.features ?? []) as any[];
       const bedrockKarst = (bedrockRes?.features ?? []) as any[];
       const knownCaves = (cavesRes?.features ?? []) as any[];
+      const soilFeatures = (soilRes?.features ?? []) as any[];
+      const floodFeatures = (floodRes?.features ?? []) as any[];
       const result = scoreRisk(deps, bbox, karstZones, bedrockKarst, null, knownCaves);
       setRiskResult(result);
+
+      // Groundwater vulnerability (DRASTIC-lite) — average soil props in bbox as proxy
+      // Pick soil point nearest bbox center for hydgrp/kffact/clay; flood check via bbox overlap
+      const [minLng, minLat, maxLng, maxLat] = bbox;
+      const cLng=(minLng+maxLng)/2, cLat=(minLat+maxLat)/2;
+      let bestSoil:any=null, bestD=Infinity;
+      for(const f of soilFeatures){ const [lng,lat]=f.geometry.coordinates; const d=(lng-cLng)**2+(lat-cLat)**2; if(d<bestD){bestD=d; bestSoil=f;}}
+      const hydgrp = bestSoil?.properties?.hydgrp ?? null;
+      const kffact = bestSoil?.properties?.kffact ?? null;
+      const clay = bestSoil?.properties?.claytotal ?? null;
+      // floodNearby: any flood poly intersecting bbox
+      const floodNearby = floodFeatures.some((f:any)=>{
+        const coords=f.geometry.coordinates?.[0]??[];
+        return coords.some(([lng,lat]:number[])=> lng>=minLng&&lng<=maxLng&&lat>=minLat&&lat<=maxLat);
+      });
+      const gw = scoreGroundwater({
+        hydgrp, kffact, clayPct: clay, bedrockKarst: result.factors.bedrockKarst,
+        karstOverlapPct: result.factors.karstZoneOverlap, nearestSinkKm: result.factors.nearestSinkholeKm,
+        nearestCaveKm: result.factors.nearestCaveKm, floodNearby,
+        dipDensity: deps.length>0 ? Math.min(deps.length/50,1) : 0,
+      });
+      setGwResult(gw);
     } catch (e) {
       // Risk scoring is best-effort — don't block the scan on it.
       console.error("Risk scoring failed:", e);
@@ -496,7 +524,7 @@ export default function MapView() {
 
   const runScanWith = async (bbox: [number, number, number, number]) => {
     setError(null); setResults(null); setSelected(null); setNearest(null);
-    setRiskResult(null);
+    setRiskResult(null); setGwResult(null);
     setScanning(true);
     try {
       const deps = await scanBboxForDepressions(bbox);
@@ -908,7 +936,7 @@ export default function MapView() {
               </div>
             )}
 
-            <RiskPanel riskResult={riskResult} />
+            <RiskPanel riskResult={riskResult} gwResult={gwResult} />
 
             <ul className="kw-card kw-scroll mt-3 max-h-64 divide-y divide-kw-line overflow-y-auto">
               {results
@@ -1106,28 +1134,74 @@ export default function MapView() {
         {/* Advanced + disclaimer */}
         <div className="pt-5">
           <button onClick={() => setShowAdvanced((s) => !s)} aria-expanded={showAdvanced}
-            className="text-xs font-medium text-kw-muted underline-offset-2 hover:text-kw-ink hover:underline">
-            {showAdvanced ? "Hide map layers & info" : "Map layers & info"}
+            className="text-sm font-bold text-stone-700 underline-offset-2 hover:text-stone-900 hover:underline">
+            {showAdvanced ? "▾ Hide map layers & info" : "▸ Map layers & info"}
           </button>
           {showAdvanced && (
-            <div className="kw-card mt-2 space-y-2 p-3">
-              {([
-                ["hillshade", "Shaded terrain"],
-                ["karst", "Known sinkhole areas (state survey)"],
-                ["bedrockKarst", "Limestone/dolomite bedrock (karst potential)"],
-                ["caves", "Cave entrances / sinkhole clusters"],
-                ["soil", "Soil erodibility — septic failure risk (SSURGO, no key)"],
-                ["flood", "FEMA floodplains — 100yr (AE/A, public, no key)"],
-                ["springs", "Mapped springs"],
-                ["countyHeat", "County risk heatmap (92 counties + Monroe dips)"],
-              ] as [LayerKey, string][]).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={layers[key]} onChange={() => toggle(key)} className="accent-kw-accent" disabled={!ready} />
-                  {label}
-                </label>
-              ))}
+            <div className="kw-card mt-3 space-y-4 p-4 bg-white">
+              {/* Grouped, easy to scan */}
+              <div>
+                <div className="text-[11px] font-extrabold tracking-widest text-stone-500 uppercase">Base map</div>
+                <div className="mt-2 space-y-2">
+                  {([
+                    ["hillshade", "Shaded terrain", "Hill shading shows low spots where water can pool."],
+                    ["countyHeat", "County risk heatmap", "92 counties colored by karst risk + Monroe scanned dips."],
+                  ] as [LayerKey, string, string][]).map(([key, label, hint]) => (
+                    <label key={key} className="flex items-start gap-3 text-sm">
+                      <input type="checkbox" checked={layers[key]} onChange={() => toggle(key)} className="mt-1 accent-emerald-600 h-4 w-4" disabled={!ready} />
+                      <div><div className="font-semibold text-stone-800">{label}</div><div className="text-xs text-stone-500">{hint}</div></div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-extrabold tracking-widest text-stone-500 uppercase">Karst geology</div>
+                <div className="mt-2 space-y-2">
+                  {([
+                    ["karst", "Known sinkhole areas", "State survey karst polygons — where sinkholes have been mapped."],
+                    ["bedrockKarst", "Limestone bedrock", "Limestone/dolomite = high karst potential zone."],
+                    ["caves", "Cave clusters", "Purple circles — sinkhole clusters (cave proxy). Number = count."],
+                  ] as [LayerKey, string, string][]).map(([key, label, hint]) => (
+                    <label key={key} className="flex items-start gap-3 text-sm">
+                      <input type="checkbox" checked={layers[key]} onChange={() => toggle(key)} className="mt-1 accent-orange-500 h-4 w-4" disabled={!ready} />
+                      <div><div className="font-semibold text-stone-800">{label}</div><div className="text-xs text-stone-500">{hint}</div></div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-extrabold tracking-widest text-sky-700 uppercase">Water & soil</div>
+                <div className="mt-2 space-y-2">
+                  {([
+                    ["soil", "Soil erodibility", "SSURGO — green LOW / orange MODERATE / red HIGH septic risk."],
+                    ["flood", "FEMA floodplains", "Blue = 100-year floodplain (AE/A). Higher recharge to groundwater."],
+                    ["springs", "Mapped springs", "Blue dots — known springs, often where groundwater surfaces."],
+                  ] as [LayerKey, string, string][]).map(([key, label, hint]) => (
+                    <label key={key} className="flex items-start gap-3 text-sm">
+                      <input type="checkbox" checked={layers[key]} onChange={() => toggle(key)} className="mt-1 accent-sky-600 h-4 w-4" disabled={!ready} />
+                      <div><div className="font-semibold text-stone-800">{label}</div><div className="text-xs text-stone-500">{hint}</div></div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mini legend */}
+              <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+                <div className="text-xs font-bold text-stone-700">How to read the map</div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-stone-600">
+                  <div><span className="inline-block h-3 w-3 rounded-full bg-emerald-500 align-middle mr-1"></span>Low risk</div>
+                  <div><span className="inline-block h-3 w-3 rounded-full bg-amber-400 align-middle mr-1"></span>Moderate</div>
+                  <div><span className="inline-block h-3 w-3 rounded-full bg-orange-500 align-middle mr-1"></span>High</div>
+                  <div><span className="inline-block h-3 w-3 rounded-full bg-red-600 align-middle mr-1"></span>Critical</div>
+                  <div><span className="inline-block h-3 w-3 rounded-sm bg-sky-500/30 border border-sky-600 align-middle mr-1"></span>Floodplain</div>
+                  <div><span className="inline-block h-3 w-3 rounded-full bg-purple-600 align-middle mr-1"></span>Cave cluster</div>
+                </div>
+              </div>
+
               <InSARPanel bbox={scanBbox ?? [-86.85, 38.95, -86.25, 39.45]} />
-              <details className="rounded-lg border border-kw-line bg-kw-bg p-3 text-xs leading-relaxed text-kw-muted">
+              <details className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm leading-relaxed text-stone-600">
                 <summary className="cursor-pointer font-medium text-kw-ink">About &amp; limitations</summary>
                 <p className="mt-2">KarstWatch is educational and built entirely on free public data: elevation from USGS/NASA (AWS Open Data), karst maps from the Indiana Geological &amp; Water Survey, addresses from OpenStreetMap.</p>
                 <p className="mt-2"><b className="text-kw-ink">This is not a geological survey.</b> Dips are shapes in elevation data — some are sinkholes, many aren&apos;t. Never buy, dig, drill, or build based on this alone.</p>
