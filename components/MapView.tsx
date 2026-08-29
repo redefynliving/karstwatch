@@ -96,8 +96,10 @@ export default function MapView() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const springsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinRef = useRef<maplibregl.Marker | null>(null);
+  const mapWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [ready, setReady] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     countyHeat: true, hillshade: true, karst: true, springs: false, bedrockKarst: false,
     caves: false, soil: false, flood: false,
@@ -143,7 +145,9 @@ export default function MapView() {
 
     if (!mapDiv.current || mapRef.current) return;
 
-    const map = new maplibregl.Map({
+    let map: maplibregl.Map;
+    try {
+      map = new maplibregl.Map({
       container: mapDiv.current,
       style: {
         version: 8,
@@ -259,6 +263,15 @@ export default function MapView() {
       zoom: 12,
       preserveDrawingBuffer: true,
     });
+    } catch (err) {
+      setMapError(String(err));
+      return;
+    }
+
+    // 15-second watchdog: if the map hasn't loaded by then, show an error.
+    mapWatchdogRef.current = setTimeout(() => {
+      setMapError("The map took too long to load — check your connection.");
+    }, 15000);
 
     class LocateControl implements maplibregl.IControl {
       private btn!: HTMLButtonElement;
@@ -311,6 +324,7 @@ export default function MapView() {
     map.addControl(new LocateControl(), "bottom-right");
 
     map.on("load", () => {
+      if (mapWatchdogRef.current) { clearTimeout(mapWatchdogRef.current); mapWatchdogRef.current = null; }
       // Custom polygon drawing (MapboxDraw is unreliable on MapLibre — clicks
       // don't register points). We own the whole interaction: click to add
       // vertices, click first point or double-click to close, Esc cancels.
@@ -432,6 +446,7 @@ export default function MapView() {
     mapRef.current = map;
     return () => {
       if (springsDebounceRef.current) clearTimeout(springsDebounceRef.current);
+      if (mapWatchdogRef.current) { clearTimeout(mapWatchdogRef.current); mapWatchdogRef.current = null; }
       map.off("moveend", onMoveEnd);
       map.remove();
       mapRef.current = null;
@@ -1270,7 +1285,22 @@ export default function MapView() {
         </div>
       </aside>
 
-      <div ref={mapDiv} className="relative order-1 h-screen w-full flex-1 md:order-2 md:h-full" />
+      <div ref={mapDiv} className="relative order-1 h-screen w-full flex-1 md:order-2 md:h-full">
+        {mapError && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/90">
+            <div className="rounded-xl bg-white p-8 shadow-lg max-w-sm w-full text-center">
+              <p className="mb-2 text-sm font-semibold text-red-700">{mapError}</p>
+              <p className="mb-4 text-xs text-kw-muted">Usually fixed by a refresh after an app update.</p>
+              <button
+                onClick={() => location.reload()}
+                className="px-5 py-2 rounded-lg bg-kw-emerald text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+              >
+                Reload app
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </>
   );
 }
