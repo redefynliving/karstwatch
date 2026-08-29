@@ -46,17 +46,25 @@ export default function AboutPage() {
             under Map layers &amp; info.
           </li>
           <li>
-            <b className="text-kw-ink">Soil erodibility:</b> USDA SSURGO via public SDA
-            (no key, no secret) — 62 Monroe mapunits with K-factor, clay %, hydrologic
-            group → septic-failure risk (HIGH/MODERATE/LOW). Toggle "Soil erodibility —
-            septic failure risk" to see green/orange/red dots. 15KB static cache
-            <code>ssurgo-monroe.geojson</code>.
+            <b className="text-kw-ink">Mapped springs:</b> Indiana Geological Survey{" "}
+            <i>Karst_Springs</i> dataset — 486 mapped spring locations served live via{" "}
+            <code>/api/springs</code> (public, no key). Blue dots on the map; toggle
+            "Mapped springs" under Map layers &amp; info. Springs often mark where
+            groundwater resurfaces after flowing through karst conduits underground.
           </li>
           <li>
-            <b className="text-kw-ink">FEMA floodplains:</b> Public ArcGIS
-            USA_Flood_Hazard_Reduced_Set (no key, no secret) — 8 high-risk 100yr
-            floodplains (AE/A) clipped to Monroe, simplified to 114KB.
-            Toggle "FEMA floodplains — 100yr". Blue fill + dashed outline.
+            <b className="text-kw-ink">Soil erodibility — karst belt:</b> USDA SSURGO via public SDA
+            (no key, no secret) — mapunits across 17 south-central Indiana karst-belt counties
+            with K-factor, clay %, hydrologic group → septic-failure risk (HIGH/MODERATE/LOW).
+            Toggle "Soil erodibility — karst belt" to see green/orange/red dots. Static cache
+            <code>ssurgo-karstbelt.geojson</code>.
+          </li>
+          <li>
+            <b className="text-kw-ink">FEMA floodplains — karst belt:</b> Public ArcGIS
+            USA_Flood_Hazard_Reduced_Set (no key, no secret) — 100-yr floodplains (AE/A)
+            clipped to the south-central Indiana karst belt (bbox −87.7 to −85.8 lon,
+            37.7 to 39.65 lat), aggressively decimated to stay ≤ 500 KB.
+            Toggle "FEMA floodplains — karst belt". Blue fill + dashed outline.
           </li>
           <li>
             <b className="text-kw-ink">Risk scoring:</b> After each scan, KarstWatch Pro computes a
@@ -137,7 +145,52 @@ export default function AboutPage() {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-2 text-lg font-bold">Privacy & cost</h2>
+        <h2 className="mb-2 text-lg font-bold">Export &amp; report card</h2>
+        <p>
+          After a scan, the <b>Export</b> button in the results panel generates a map
+          PNG and a one-click PDF report card containing: composite karst / groundwater
+          risk scores, a well-water advisory, and a ranked list of the top depressions
+          by depth and circularity. The PDF is produced entirely in the browser — nothing
+          is uploaded to a server.
+        </p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-lg font-bold">Satellite ground-movement check (InSAR)</h2>
+        <p>
+          After a scan, the <b>Check if the ground is moving</b> panel links directly to
+          NASA ASF Vertex, a free archive of Sentinel-1 C-band radar imagery already
+          pre-filtered to your scanned area. Vertex requires a free NASA Earthdata account
+          (sign-up is on their site — nothing to configure here). Use it to browse
+          InSAR-derived ground-deformation time-series for the area. Rings of color that
+          tighten over successive passes can indicate slow subsidence.
+        </p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-lg font-bold">Auto-reload watchdog</h2>
+        <p>
+          KarstWatch registers a service worker that caches elevation tiles locally.
+          When a new version is deployed the service worker detects stale assets and
+          triggers a one-time automatic page reload so you always run the latest code
+          without manually clearing cache.
+        </p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-lg font-bold">Testing</h2>
+        <p>
+          Run <code className="rounded bg-kw-bg px-1">npm run test</code> to execute the
+          Vitest suite. Tests guard the karst-risk and groundwater-risk scoring engines
+          in <code>lib/risk.ts</code> and <code>lib/groundwater.ts</code>, ensuring
+          score boundaries, edge cases, and the septic-risk heuristic remain correct
+          across changes.
+        </p>
+      </section>
+
+
+      <section className="mb-8">
+        <h2 className="mb-2 text-lg font-bold">Privacy &amp; cost</h2>
         <p>
           Everything runs in your browser. Your drawn shape never touches a server.
           Elevation tiles are cached locally via a service worker so repeat scans
