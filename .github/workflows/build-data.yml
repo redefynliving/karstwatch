@@ -1,0 +1,61 @@
+name: Data refresh
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - data/trigger.txt
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm install --no-save pngjs
+
+      - name: Build FEMA floodplains (karst belt)
+        run: node scripts/build-fema.mjs
+
+      - name: Build SSURGO soils (karst belt)
+        run: node scripts/build-soil.mjs
+
+      - name: Pre-scan karst-belt depressions
+        run: node scripts/build-county-depressions.mjs
+
+      - name: Open data PR
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- public/static/geo public/county-depressions.geojson; then
+            echo "No data changes — nothing to PR."
+            exit 0
+          fi
+          BRANCH="data/update-${{ github.run_id }}"
+          git checkout -b "$BRANCH"
+          git add public/static/geo public/county-depressions.geojson
+          git commit -m "data: refresh geo datasets (run ${{ github.run_id }})"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "data: refresh geo datasets (run ${{ github.run_id }})" \
+            --body "Automated data refresh (workflow run ${{ github.run_id }}). Check the run log for per-script feature counts and file sizes before merging."
