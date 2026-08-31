@@ -162,7 +162,7 @@ export default function MapView() {
           depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "county-risk": { type: "geojson", data: "/static/geo/county-risk.geojson" },
-          "soil": { type: "geojson", data: "/static/geo/ssurgo-monroe.geojson" },
+          "soil": { type: "geojson", data: "/static/geo/ssurgo-karstbelt.geojson" },
           "flood": { type: "geojson", data: "/static/geo/fema-flood.geojson" },
           "bedrock-karst": { type: "geojson", data: "/static/geo/bedrock-karst.geojson" },
           "caves": { type: "geojson", data: "/static/geo/caves-clustered.geojson" },
@@ -547,7 +547,7 @@ export default function MapView() {
         fetch("/api/karst").then(r => r.json()),
         fetch("/static/geo/bedrock-karst.geojson").then(r => r.json()),
         fetch("/static/geo/caves-clustered.geojson").then(r => r.json()),
-        fetch("/static/geo/ssurgo-monroe.geojson").then(r => r.json()).catch(()=>({features:[]})),
+        fetch("/static/geo/ssurgo-karstbelt.geojson").then(r => r.json()).catch(()=>({features:[]})),
         fetch("/static/geo/fema-flood.geojson").then(r => r.json()).catch(()=>({features:[]})),
       ]);
       const karstZones = (karstRes?.features ?? []) as any[];
@@ -1245,8 +1245,8 @@ export default function MapView() {
                 <div className="text-[11px] font-extrabold tracking-widest text-sky-700 uppercase">Water & soil</div>
                 <div className="mt-2 space-y-2">
                   {([
-                    ["soil", "Soil erodibility", "SSURGO — green LOW / orange MODERATE / red HIGH septic risk."],
-                    ["flood", "FEMA floodplains", "Blue = 100-year floodplain (AE/A). Higher recharge to groundwater."],
+                    ["soil", "Soil erodibility — karst belt", "SSURGO (17-county karst belt) — green LOW / orange MODERATE / red HIGH septic risk."],
+                    ["flood", "FEMA floodplains — karst belt", "Blue = 100-year floodplain (AE/A), south-central Indiana karst belt. Higher recharge to groundwater."],
                     ["springs", "Mapped springs", "Blue dots — known springs, often where groundwater surfaces."],
                   ] as [LayerKey, string, string][]).map(([key, label, hint]) => (
                     <label key={key} className="flex items-start gap-3 text-sm">
