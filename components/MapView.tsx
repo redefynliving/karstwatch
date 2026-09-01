@@ -6,8 +6,15 @@ import maplibregl from "maplibre-gl";
 import { scanBboxForDepressions, type Depression } from "@/lib/depression";
 import { scoreRisk, type RiskResult } from "@/lib/risk";
 import { scoreGroundwater, type GwResult } from "@/lib/groundwater";
+import { scoreWell, wellFactorsFrom, type WellResult } from "@/lib/wellwater";
+import { scoreInsurance, insFactorsFrom, type InsResult } from "@/lib/insurance";
+import type { TimeLapseResult } from "@/lib/timelapse";
 import InSARPanel from "@/components/InSARPanel";
 import RiskPanel from "@/components/RiskPanel";
+import WellWaterPanel from "@/components/WellWaterPanel";
+import InsurancePanel from "@/components/InsurancePanel";
+import OfflinePreCache from "@/components/OfflinePreCache";
+import TimeLapsePanel from "@/components/TimeLapsePanel";
 
 const BLOOMINGTON: [number, number] = [-86.5264, 39.1653];
 const COUNTY_BBOX = "-87.0,39.0,-86.0,39.5";
@@ -19,7 +26,7 @@ const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
-type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst" | "caves" | "soil" | "flood";
+type LayerKey = "countyHeat" | "hillshade" | "karst" | "springs" | "bedrockKarst" | "caves" | "soil" | "flood" | "timelapse";
 interface GeoResult { main: string; sub: string; full: string; kind: string; lat: number; lng: number; }
 interface NearestInfo { source: string; distanceM: number; }
 interface HistoryItem {
@@ -79,7 +86,7 @@ export default function MapView() {
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     countyHeat: true, hillshade: true, karst: true, springs: false, bedrockKarst: false,
-    caves: false, soil: false, flood: false,
+    caves: false, soil: false, flood: false, timelapse: true,
   });
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [pins, setPins] = useState<HistoryItem[]>([]);
@@ -92,6 +99,10 @@ export default function MapView() {
   const [drawing, setDrawing] = useState(false);
   const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
   const [gwResult, setGwResult] = useState<GwResult | null>(null);
+  const [wellResult, setWellResult] = useState<WellResult | null>(null);
+  const [insResult, setInsResult] = useState<InsResult | null>(null);
+  const [floodNearby, setFloodNearby] = useState(false);
+  const [timeLapseResult, setTimeLapseResult] = useState<TimeLapseResult | null>(null);
   const [neighborhoodScan, setNeighborhoodScan] = useState(false);
   const [confidenceFilter, setConfidenceFilter] = useState<"all" | "likely" | "uncertain">("all");
 
@@ -144,6 +155,7 @@ export default function MapView() {
           "draw-line": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "draw-verts": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "draw-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "timelapse": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
         },
         layers: [
           { id: "bg", type: "background", paint: { "background-color": "#eef0ea" } },
@@ -200,6 +212,13 @@ export default function MapView() {
             paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
           { id: "depressions-line", type: "line", source: "depressions",
             paint: { "line-width": 2, "line-color": ["get", "stroke"] } },
+          { id: "timelapse-circle", type: "circle", source: "timelapse",
+            layout: { visibility: "none" },
+            paint: {
+              "circle-radius": ["interpolate", ["linear"], ["get", "deltaM"], 1, 3, 3, 6, 6, 9, 12, 14],
+              "circle-color": ["interpolate", ["linear"], ["get", "deltaM"], 1, "#ffd54f", 3, "#ff8f00", 6, "#e53935", 12, "#8e0000"],
+              "circle-stroke-color": "#fff", "circle-stroke-width": 0.8, "circle-opacity": 0.92, "circle-stroke-opacity": 0.9,
+            } },
           { id: "springs-circle", type: "circle", source: "springs",
             layout: { visibility: "none" },
             paint: { "circle-radius": 5, "circle-color": "#3b7dd8",
@@ -458,6 +477,9 @@ export default function MapView() {
       mapRef.current.setLayoutProperty("flood-fill", "visibility", vis);
       mapRef.current.setLayoutProperty("flood-line", "visibility", vis);
     }
+    if (key === "timelapse") {
+      mapRef.current.setLayoutProperty("timelapse-circle", "visibility", vis);
+    }
   };
 
   const clearScan = () => {
@@ -516,6 +538,15 @@ export default function MapView() {
         dipDensity: deps.length>0 ? Math.min(deps.length/50,1) : 0,
       });
       setGwResult(gw);
+      setFloodNearby(floodNearby);
+
+      // Well-water test cadence
+      const wf = wellFactorsFrom(gw, result);
+      setWellResult(scoreWell(wf));
+
+      // Insurance sinkhole-claim proxy
+      const ins = scoreInsurance(insFactorsFrom(result, gw, floodNearby));
+      setInsResult(ins);
     } catch (e) {
       // Risk scoring is best-effort — don't block the scan on it.
       console.error("Risk scoring failed:", e);
@@ -524,7 +555,8 @@ export default function MapView() {
 
   const runScanWith = async (bbox: [number, number, number, number]) => {
     setError(null); setResults(null); setSelected(null); setNearest(null);
-    setRiskResult(null); setGwResult(null);
+    setRiskResult(null); setGwResult(null); setWellResult(null); setInsResult(null);
+    setTimeLapseResult(null);
     setScanning(true);
     try {
       const deps = await scanBboxForDepressions(bbox);
@@ -937,6 +969,8 @@ export default function MapView() {
             )}
 
             <RiskPanel riskResult={riskResult} gwResult={gwResult} />
+            <WellWaterPanel well={wellResult} />
+            <InsurancePanel ins={insResult} />
 
             <ul className="kw-card kw-scroll mt-3 max-h-64 divide-y divide-kw-line overflow-y-auto">
               {results
@@ -1090,6 +1124,9 @@ export default function MapView() {
   <p>Total dips detected: <b>${results?.length ?? 1}</b></p>
   <p>Likely sinkholes: <b>${results?.filter(r => r.confidence === "likely").length ?? 0}</b> · Uncertain: <b>${results?.filter(r => r.confidence === "uncertain").length ?? 0}</b> · Natural depressions: <b>${results?.filter(r => r.confidence === "low").length ?? 0}</b></p>
   ${riskResult ? `<p className="mt-2">Karst risk: <b>${riskResult.risk}</b> (score ${riskResult.score.toFixed(2)}) — ${riskResult.recommendation}</p>` : ""}
+  ${gwResult ? `<p>Groundwater vulnerability: <b>${gwResult.level}</b> (${gwResult.score}/100) — ${gwResult.why}</p>` : ""}
+  ${wellResult ? `<p>Well-water test cadence: <b>${wellResult.cadence}</b> (priority ${wellResult.priority}/100). Tests: ${wellResult.tests.join(", ")}.</p>` : ""}
+  ${insResult ? `<p>Insurance signal: <b>${insResult.level}</b> (${insResult.score}/100, not a quote) — ${insResult.headline}.</p>` : ""}
   ${results ? `<p>Deepest: <b>${Math.max(...results.map(r => r.depthM)).toFixed(1)} m</b> · Largest: <b>${(Math.max(...results.map(r => r.areaM2)) / 4046.86).toFixed(2)} acres</b></p>` : `<p>Selected dip: <b>${selected.depthM.toFixed(1)} m deep</b> · ${(selected.areaM2 / 4046.86).toFixed(2)} acres</p>`}
 
   <h2>Details</h2>
@@ -1178,6 +1215,7 @@ export default function MapView() {
                     ["soil", "Soil erodibility", "SSURGO — green LOW / orange MODERATE / red HIGH septic risk."],
                     ["flood", "FEMA floodplains", "Blue = 100-year floodplain (AE/A). Higher recharge to groundwater."],
                     ["springs", "Mapped springs", "Blue dots — known springs, often where groundwater surfaces."],
+                    ["timelapse", "Time-lapse new subsidence", "Red/orange dots — cells where the modern DEM shows new closed depressions vs the older one."],
                   ] as [LayerKey, string, string][]).map(([key, label, hint]) => (
                     <label key={key} className="flex items-start gap-3 text-sm">
                       <input type="checkbox" checked={layers[key]} onChange={() => toggle(key)} className="mt-1 accent-sky-600 h-4 w-4" disabled={!ready} />
@@ -1201,6 +1239,24 @@ export default function MapView() {
               </div>
 
               <InSARPanel bbox={scanBbox ?? [-86.85, 38.95, -86.25, 39.45]} />
+              <TimeLapsePanel
+                bbox={scanBbox ?? [-86.85, 38.95, -86.25, 39.45]}
+                onResult={(r) => {
+                  setTimeLapseResult(r);
+                  // Add new subsidence overlay to map if source exists
+                  try {
+                    const src = mapRef.current?.getSource("timelapse") as maplibregl.GeoJSONSource | undefined;
+                    if (src) src.setData(r.fc);
+                  } catch {}
+                }}
+              />
+              {timeLapseResult && (
+                <div className="rounded-lg border border-amber-200 bg-white p-3">
+                  <div className="text-xs font-bold text-amber-900">Time-lapse layer active</div>
+                  <p className="mt-1 text-xs text-stone-700">{timeLapseResult.newDipCount} new subsidence cells on the map.</p>
+                </div>
+              )}
+              <OfflinePreCache />
               <details className="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm leading-relaxed text-stone-600">
                 <summary className="cursor-pointer font-medium text-kw-ink">About &amp; limitations</summary>
                 <p className="mt-2">KarstWatch is educational and built entirely on free public data: elevation from USGS/NASA (AWS Open Data), karst maps from the Indiana Geological &amp; Water Survey, addresses from OpenStreetMap.</p>
