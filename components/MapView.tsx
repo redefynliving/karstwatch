@@ -52,6 +52,45 @@ function depthLabel(d: number): string {
   return "Very shallow dip";
 }
 
+// ---- scan result cache (localStorage) ----------------------------------------
+// Bbox-keyed (5 decimal places, ~1m precision) so identical scans hydrate instantly
+// when shared via URL. Cap 8 most-recent scans; LRU eviction.
+
+type CachedScan = {
+  bbox: [number, number, number, number];
+  results: Depression[];
+  risk: RiskResult | null;
+  gw: GwResult | null;
+  well: WellResult | null;
+  ins: InsResult | null;
+  at: number;
+};
+
+function bboxKey(b: [number, number, number, number]): string {
+  return b.map((n) => n.toFixed(5)).join(",");
+}
+
+function loadCachedScan(bbox: [number, number, number, number]): CachedScan | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const all = JSON.parse(localStorage.getItem("kw-scans") ?? "{}") as Record<string, CachedScan>;
+    return all[bboxKey(bbox)] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedScan(scan: CachedScan) {
+  if (typeof window === "undefined") return;
+  try {
+    const all = JSON.parse(localStorage.getItem("kw-scans") ?? "{}") as Record<string, CachedScan>;
+    all[bboxKey(scan.bbox)] = scan;
+    // LRU: keep 8 most recent
+    const entries = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 8);
+    localStorage.setItem("kw-scans", JSON.stringify(Object.fromEntries(entries)));
+  } catch {}
+}
+
 /** Tiny inline icon set — no emoji, no external icon lib weight. */
 const Icon = {
   pin: "M12 21s-7-6.1-7-11a7 7 0 1 1 14 0c0 4.9-7 11-7 11z M12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
@@ -77,11 +116,12 @@ function KindIcon({ kind }: { kind: string }) {
   );
 }
 
-export default function MapView() {
+export default function MapView({ autoRunParam = false }: { autoRunParam?: boolean }) {
   const mapDiv = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinRef = useRef<maplibregl.Marker | null>(null);
+  const autoRunRef = useRef(autoRunParam);
 
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
@@ -102,6 +142,14 @@ export default function MapView() {
   const [wellResult, setWellResult] = useState<WellResult | null>(null);
   const [insResult, setInsResult] = useState<InsResult | null>(null);
   const [floodNearby, setFloodNearby] = useState(false);
+
+  // Mirror latest scores into a ref so the post-scan cache write can read
+  // them synchronously (setState is async; without this we'd cache nulls).
+  const latestScoresRef = useRef<{ risk: RiskResult | null; gw: GwResult | null; well: WellResult | null; ins: InsResult | null }>({ risk: null, gw: null, well: null, ins: null });
+  const setRisk = (v: RiskResult | null) => { latestScoresRef.current.risk = v; setRiskResult(v); };
+  const setGw = (v: GwResult | null) => { latestScoresRef.current.gw = v; setGwResult(v); };
+  const setWell = (v: WellResult | null) => { latestScoresRef.current.well = v; setWellResult(v); };
+  const setIns = (v: InsResult | null) => { latestScoresRef.current.ins = v; setInsResult(v); };
   const [timeLapseResult, setTimeLapseResult] = useState<TimeLapseResult | null>(null);
   const [neighborhoodScan, setNeighborhoodScan] = useState(false);
   const [confidenceFilter, setConfidenceFilter] = useState<"all" | "likely" | "uncertain">("all");
@@ -420,10 +468,24 @@ export default function MapView() {
   useEffect(() => {
     if (!ready || bootstrapped.current) return;
     bootstrapped.current = true;
-    const p = new URLSearchParams(window.location.search).get("bbox");
+    const p = new URLSearchParams(window.location.search).get("bbox") ||
+              new URLSearchParams(window.location.search).get("scan");
     if (!p) return;
     const parts = p.split(",").map(Number);
     if (parts.length === 4 && parts.every((n) => !isNaN(n))) {
+      // Hydrate from cache instantly, then run fresh in background.
+      const cache = loadCachedScan(parts as [number, number, number, number]);
+      if (cache) {
+        try {
+          setResults(cache.results);
+          setScanBbox(cache.bbox);
+          resultsRef.current = cache.results;
+          if (cache.risk) { latestScoresRef.current.risk = cache.risk; setRiskResult(cache.risk); }
+          if (cache.gw) { latestScoresRef.current.gw = cache.gw; setGwResult(cache.gw); }
+          if (cache.well) { latestScoresRef.current.well = cache.well; setWellResult(cache.well); }
+          if (cache.ins) { latestScoresRef.current.ins = cache.ins; setInsResult(cache.ins); }
+        } catch {}
+      }
       runScanWith(parts as [number, number, number, number]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -516,6 +578,7 @@ export default function MapView() {
       const floodFeatures = (floodRes?.features ?? []) as any[];
       const result = scoreRisk(deps, bbox, karstZones, bedrockKarst, null, knownCaves);
       setRiskResult(result);
+      latestScoresRef.current.risk = result;
 
       // Groundwater vulnerability (DRASTIC-lite) — average soil props in bbox as proxy
       // Pick soil point nearest bbox center for hydgrp/kffact/clay; flood check via bbox overlap
@@ -538,15 +601,18 @@ export default function MapView() {
         dipDensity: deps.length>0 ? Math.min(deps.length/50,1) : 0,
       });
       setGwResult(gw);
+      latestScoresRef.current.gw = gw;
       setFloodNearby(floodNearby);
 
       // Well-water test cadence
       const wf = wellFactorsFrom(gw, result);
       setWellResult(scoreWell(wf));
+      latestScoresRef.current.well = scoreWell(wf);
 
       // Insurance sinkhole-claim proxy
       const ins = scoreInsurance(insFactorsFrom(result, gw, floodNearby));
       setInsResult(ins);
+      latestScoresRef.current.ins = ins;
     } catch (e) {
       // Risk scoring is best-effort — don't block the scan on it.
       console.error("Risk scoring failed:", e);
@@ -556,6 +622,7 @@ export default function MapView() {
   const runScanWith = async (bbox: [number, number, number, number]) => {
     setError(null); setResults(null); setSelected(null); setNearest(null);
     setRiskResult(null); setGwResult(null); setWellResult(null); setInsResult(null);
+    latestScoresRef.current = { risk: null, gw: null, well: null, ins: null };
     setTimeLapseResult(null);
     setScanning(true);
     try {
@@ -606,6 +673,20 @@ export default function MapView() {
           { padding: { top: 40, bottom: 80, left: 60, right: 60 }, duration: 900 },
         );
       }
+      // Always cache the full result (deps + risk + GW + well + ins) so the
+      // ?scan= link becomes a real permalink that hydrates instantly.
+      saveCachedScan({
+        bbox,
+        results: deps,
+        risk: latestScoresRef.current.risk,
+        gw: latestScoresRef.current.gw,
+        well: latestScoresRef.current.well,
+        ins: latestScoresRef.current.ins,
+        at: Date.now(),
+      });
+      // Update URL to ?scan= for sharable permalink
+      const scanQ = new URLSearchParams({ scan: bbox.map((n) => n.toFixed(5)).join(",") });
+      window.history.replaceState({}, "", `/?${scanQ}`);
     } catch (e) {
       setError(`The elevation data didn't load. Usually temporary — try again. (${(e as Error).message})`);
     } finally {
@@ -910,6 +991,23 @@ export default function MapView() {
               {verdict.headline}
             </p>
             <p className="mt-1.5 text-sm leading-relaxed text-kw-ink/80">{verdict.body}</p>
+            <details className="mt-2 text-[11px] leading-relaxed text-kw-muted">
+              <summary className="cursor-pointer font-semibold text-kw-ink hover:underline">
+                What does "likely" vs "uncertain" actually mean?
+              </summary>
+              <p className="mt-1">
+                <b className="text-kw-ink">Likely</b> dips match a sinkhole shape: round, deep, and isolated.
+                These are the ones worth your attention — a real geologist would want to see them.
+              </p>
+              <p className="mt-1">
+                <b className="text-kw-ink">Uncertain</b> dips are real depressions but might be
+                old streambeds, buried pipes, or human grading. Probably fine; worth noting.
+              </p>
+              <p className="mt-1">
+                This app is <b className="text-kw-ink">not a survey</b>. If a "likely" sits under
+                your house, hire a geotechnical engineer before any ground disturbance.
+              </p>
+            </details>
           </section>
         )}
 
