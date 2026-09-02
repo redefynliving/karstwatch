@@ -48,7 +48,12 @@ function HeroSvg() {
   );
 }
 
-export default function LandingHero({ onStart }: { onStart: () => void }) {
+interface LandingHeroProps {
+  onStart: () => void;
+  onTown: (bbox: [number, number, number, number]) => void;
+}
+
+export default function LandingHero({ onStart, onTown }: LandingHeroProps) {
   return (
     <div className="relative flex h-dvh w-screen items-center justify-center overflow-hidden bg-kw-bg">
       <div className="absolute inset-0 -z-10 opacity-90">
@@ -111,10 +116,8 @@ export default function LandingHero({ onStart }: { onStart: () => void }) {
                   const bbox: [number, number, number, number] = [
                     t.lng - half, t.lat - half, t.lng + half, t.lat + half,
                   ];
-                  window.history.replaceState({}, "",
-                    `/?scan=${bbox.map((n) => n.toFixed(5)).join(",")}`);
-                  // Force page reload so the new URL triggers auto-run
-                  window.location.reload();
+                  // Parent will rewrite URL + open map + remount MapView
+                  onTown(bbox);
                 }}
                 className="rounded-md border border-kw-line bg-white px-2 py-1.5 text-xs font-semibold text-kw-ink hover:bg-kw-soft"
               >
