@@ -6,7 +6,29 @@
  * topographic visualization (inline SVG, no asset weight) + a single CTA.
  */
 
-function HeroSvg() {
+function HeroViz() {
+  // Inline SVG for instant-first paint (no network stall). Swaps in the
+  // real screenshot (captured via Playwright) once it finishes loading.
+  return (
+    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-kw-soft shadow-lg">
+      <img
+        src="/hero-sample.jpg"
+        alt="KarstWatch scan result — 16 dips found near Bloomington, Indiana"
+        className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-300"
+        onLoad={(e) => {
+          const t = e.currentTarget as HTMLImageElement;
+          t.style.opacity = "1";
+        }}
+        loading="eager"
+        fetchPriority="high"
+      />
+      <SvgFallback />
+    </div>
+  );
+}
+
+// Static topographic placeholder rendered before the screenshot loads.
+function SvgFallback() {
   return (
     <svg viewBox="0 0 800 600" className="h-full w-full" aria-hidden>
       <defs>
@@ -57,7 +79,7 @@ export default function LandingHero({ onStart, onTown }: LandingHeroProps) {
   return (
     <div className="relative flex h-dvh w-screen items-center justify-center overflow-hidden bg-kw-bg">
       <div className="absolute inset-0 -z-10 opacity-90">
-        <HeroSvg />
+        <HeroViz />
         <div className="absolute inset-0 bg-gradient-to-b from-kw-bg/40 via-transparent to-kw-bg/60" />
       </div>
 
