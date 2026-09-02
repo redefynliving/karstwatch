@@ -19,10 +19,10 @@ import TimeLapsePanel from "@/components/TimeLapsePanel";
 const BLOOMINGTON: [number, number] = [-86.5264, 39.1653];
 const COUNTY_BBOX = "-87.0,39.0,-86.0,39.5";
 
-// Carto Positron: clean light basemap, free, no key. Far less visual noise
-// than raw OSM tiles, so our colored results pop.
-// Carto Positron @2x retina tiles: crisp on any display, free, no key.
-const BASE_TILES = ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"];
+// OpenFreeMap "liberty" — public, keyless OSM vector basemap.
+// (Carto Positron raster now requires an API key as of 2026; OpenFreeMap
+// is the free, supported replacement. Planet PMTiles + OpenMapTiles schema.)
+const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const TERRARIUM_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
@@ -183,124 +183,9 @@ export default function MapView({ autoRunParam = false }: { autoRunParam?: boole
 
     const map = new maplibregl.Map({
       container: mapDiv.current,
-      style: {
-        version: 8,
-        glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-        sources: {
-          basemap: { type: "raster", tiles: BASE_TILES, tileSize: 256,
-            attribution: "© OpenStreetMap contributors © CARTO" },
-          hillshadeDem: { type: "raster-dem", tiles: [TERRARIUM_TILES], tileSize: 256,
-            maxzoom: 15, encoding: "terrarium" },
-          karst: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-          springs: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-          depressions: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-          county: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-          "county-risk": { type: "geojson", data: "/static/geo/county-risk.geojson" },
-          "soil": { type: "geojson", data: "/static/geo/ssurgo-monroe.geojson" },
-          "flood": { type: "geojson", data: "/static/geo/fema-flood.geojson" },
-          "bedrock-karst": { type: "geojson", data: "/static/geo/bedrock-karst.geojson" },
-          "caves": { type: "geojson", data: "/static/geo/caves-clustered.geojson" },
-          "draw-line": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-          "draw-verts": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-          "draw-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-          "timelapse": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-        },
-        layers: [
-          { id: "bg", type: "background", paint: { "background-color": "#eef0ea" } },
-          { id: "basemap", type: "raster", source: "basemap" },
-          { id: "hillshade", type: "hillshade", source: "hillshadeDem",
-            paint: { "hillshade-exaggeration": 0.22, "hillshade-shadow-color": "#8a857a",
-              "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#a8a294" } },
-          { id: "karst-fill", type: "fill", source: "karst",
-            paint: { "fill-color": "#b07a24", "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.05, 0.13] } },
-          { id: "karst-line", type: "line", source: "karst",
-            paint: { "line-color": "#c49256", "line-width": 1, "line-dasharray": [2, 2] } },
-          { id: "county-circles", type: "circle", source: "county",
-            paint: {
-              "circle-radius": ["interpolate", ["linear"], ["get", "depth"], 1, 4, 5, 9, 10, 16],
-              "circle-color": ["interpolate", ["linear"], ["get", "depth"],
-                1, "#5ac85a", 3, "#ffd93d", 6, "#ff6b35", 12, "#c1292e"],
-              "circle-stroke-color": "#fff", "circle-stroke-width": 0.5,
-              "circle-stroke-opacity": 0.7, "circle-opacity": 0.8,
-            },
-          },
-          { id: "county-risk-circles", type: "circle", source: "county-risk",
-            paint: {
-              "circle-radius": ["interpolate", ["linear"], ["get", "risk_score"], 0, 5, 0.4, 8, 0.7, 13, 1, 18],
-              "circle-color": ["interpolate", ["linear"], ["get", "risk_score"],
-                0, "#e8f5e9", 0.2, "#a5d6a7", 0.4, "#ffd54f", 0.7, "#ff6b35", 1, "#c62828"],
-              "circle-stroke-color": "#fff", "circle-stroke-width": 1,
-              "circle-opacity": 0.85, "circle-stroke-opacity": 0.9,
-            },
-          },
-          { id: "county-risk-label", type: "symbol", source: "county-risk",
-            layout: { "text-field": ["get", "county"], "text-font": ["Open Sans Regular"], "text-size": 9, "text-allow-overlap": false },
-            paint: { "text-color": "#3e2723", "text-halo-color": "#fff", "text-halo-width": 1 },
-          },
-          { id: "soil-circles", type: "circle", source: "soil",
-            layout: { visibility: "none" },
-            paint: {
-              "circle-radius": 6, "circle-stroke-color": "#fff", "circle-stroke-width": 0.8, "circle-opacity": 0.9,
-              "circle-color": ["match", ["get", "septic_risk"], "HIGH", "#c62828", "MODERATE", "#ff8f00", "LOW", "#7cb342", "#ccc"],
-            },
-          },
-          { id: "soil-label", type: "symbol", source: "soil",
-            layout: { visibility: "none", "text-field": ["get", "musym"], "text-font": ["Open Sans Regular"], "text-size": 8 },
-            paint: { "text-color": "#2e2e2e", "text-halo-color": "#fff", "text-halo-width": 0.8 },
-          },
-          { id: "flood-fill", type: "fill", source: "flood",
-            layout: { visibility: "none" },
-            paint: { "fill-color": "#1e88e5", "fill-opacity": 0.22 },
-          },
-          { id: "flood-line", type: "line", source: "flood",
-            layout: { visibility: "none" },
-            paint: { "line-color": "#0d47a1", "line-width": 1, "line-opacity": 0.6, "line-dasharray": [2,1] },
-          },
-          { id: "depressions-fill", type: "fill", source: "depressions",
-            paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
-          { id: "depressions-line", type: "line", source: "depressions",
-            paint: { "line-width": 2, "line-color": ["get", "stroke"] } },
-          { id: "timelapse-circle", type: "circle", source: "timelapse",
-            layout: { visibility: "none" },
-            paint: {
-              "circle-radius": ["interpolate", ["linear"], ["get", "deltaM"], 1, 3, 3, 6, 6, 9, 12, 14],
-              "circle-color": ["interpolate", ["linear"], ["get", "deltaM"], 1, "#ffd54f", 3, "#ff8f00", 6, "#e53935", 12, "#8e0000"],
-              "circle-stroke-color": "#fff", "circle-stroke-width": 0.8, "circle-opacity": 0.92, "circle-stroke-opacity": 0.9,
-            } },
-          { id: "springs-circle", type: "circle", source: "springs",
-            layout: { visibility: "none" },
-            paint: { "circle-radius": 5, "circle-color": "#3b7dd8",
-              "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } },
-          { id: "bedrock-karst-fill", type: "fill", source: "bedrock-karst",
-            layout: { visibility: "none" },
-            paint: { "fill-color": "#ff6b35", "fill-opacity": 0.15 } },
-          { id: "bedrock-karst-line", type: "line", source: "bedrock-karst",
-            layout: { visibility: "none" },
-            paint: { "line-color": "#ff6b35", "line-width": 1.5,
-              "line-opacity": 0.8, "line-dasharray": [3, 1] } },
-          { id: "caves-circles", type: "circle", source: "caves",
-            layout: { visibility: "none" },
-            paint: {
-              "circle-radius": ["step", ["get", "count"], 6, 50, 10, 100, 14, 200, 18],
-              "circle-color": "#7c3aed", "circle-stroke-color": "#fff",
-              "circle-stroke-width": 1, "circle-opacity": 0.85,
-            },
-          },
-          { id: "caves-label", type: "symbol", source: "caves",
-            layout: { visibility: "none", "text-field": ["get", "count"],
-              "text-font": ["Open Sans Regular"], "text-size": 11 },
-            paint: { "text-color": "#fff", "text-halo-color": "#7c3aed",
-              "text-halo-width": 0.8 },
-          },
-          { id: "draw-fill", type: "fill", source: "draw-fill",
-            paint: { "fill-color": "#2e7d5b", "fill-opacity": 0.08 } },
-          { id: "draw-line", type: "line", source: "draw-line",
-            paint: { "line-color": "#2e7d5b", "line-width": 2.5, "line-dasharray": [2, 1.5] } },
-          { id: "draw-verts", type: "circle", source: "draw-verts",
-            paint: { "circle-radius": 5.5, "circle-color": "#2e7d5b",
-              "circle-stroke-color": "#fff", "circle-stroke-width": 2 } },
-        ],
-      },
+      // OpenFreeMap vector basemap (public, keyless). Our custom sources
+      // and layers are added on the 'load' event below.
+      style: BASEMAP_STYLE,
       center: BLOOMINGTON,
       zoom: 12,
     });
@@ -356,6 +241,115 @@ export default function MapView({ autoRunParam = false }: { autoRunParam?: boole
     map.addControl(new LocateControl(), "bottom-right");
 
     map.on("load", () => {
+      // --- Register all custom sources + layers on top of the OpenFreeMap
+      // base style (which loads async via the style URL). Layer order matters:
+      // the last addLayer call renders on top. ---
+      if (!map.getSource("hillshadeDem")) {
+        map.addSource("hillshadeDem", {
+          type: "raster-dem",
+          tiles: [TERRARIUM_TILES],
+          tileSize: 256,
+          maxzoom: 15,
+          encoding: "terrarium",
+        });
+      }
+      map.addLayer({ id: "hillshade", type: "hillshade", source: "hillshadeDem",
+        paint: { "hillshade-exaggeration": 0.22, "hillshade-shadow-color": "#8a857a",
+          "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#a8a294" } });
+
+      const geoSrc = (id: string) => ({ type: "geojson" as const, data: { type: "FeatureCollection" as const, features: [] } });
+      for (const id of ["karst","springs","depressions","county","draw-line","draw-verts","draw-fill","timelapse"]) {
+        if (!map.getSource(id)) map.addSource(id, geoSrc(id));
+      }
+      if (!map.getSource("county-risk")) map.addSource("county-risk", { type: "geojson", data: "/static/geo/county-risk.geojson" });
+      if (!map.getSource("soil")) map.addSource("soil", { type: "geojson", data: "/static/geo/ssurgo-monroe.geojson" });
+      if (!map.getSource("flood")) map.addSource("flood", { type: "geojson", data: "/static/geo/fema-flood.geojson" });
+      if (!map.getSource("bedrock-karst")) map.addSource("bedrock-karst", { type: "geojson", data: "/static/geo/bedrock-karst.geojson" });
+      if (!map.getSource("caves")) map.addSource("caves", { type: "geojson", data: "/static/geo/caves-clustered.geojson" });
+
+      const layers: any[] = [
+        { id: "karst-fill", type: "fill", source: "karst",
+          paint: { "fill-color": "#b07a24", "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.05, 0.13] } },
+        { id: "karst-line", type: "line", source: "karst",
+          paint: { "line-color": "#c49256", "line-width": 1, "line-dasharray": [2, 2] } },
+        { id: "county-circles", type: "circle", source: "county",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["get", "depth"], 1, 4, 5, 9, 10, 16],
+            "circle-color": ["interpolate", ["linear"], ["get", "depth"],
+              1, "#5ac85a", 3, "#ffd93d", 6, "#ff6b35", 12, "#c1292e"],
+            "circle-stroke-color": "#fff", "circle-stroke-width": 0.5,
+            "circle-stroke-opacity": 0.7, "circle-opacity": 0.8,
+          } },
+        { id: "county-risk-circles", type: "circle", source: "county-risk",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["get", "risk_score"], 0, 5, 0.4, 8, 0.7, 13, 1, 18],
+            "circle-color": ["interpolate", ["linear"], ["get", "risk_score"],
+              0, "#e8f5e9", 0.2, "#a5d6a7", 0.4, "#ffd54f", 0.7, "#ff6b35", 1, "#c62828"],
+            "circle-stroke-color": "#fff", "circle-stroke-width": 1,
+            "circle-opacity": 0.85, "circle-stroke-opacity": 0.9,
+          } },
+        { id: "county-risk-label", type: "symbol", source: "county-risk",
+          layout: { "text-field": ["get", "county"], "text-font": ["Open Sans Regular"], "text-size": 9, "text-allow-overlap": false },
+          paint: { "text-color": "#3e2723", "text-halo-color": "#fff", "text-halo-width": 1 } },
+        { id: "soil-circles", type: "circle", source: "soil",
+          layout: { visibility: "none" },
+          paint: {
+            "circle-radius": 6, "circle-stroke-color": "#fff", "circle-stroke-width": 0.8, "circle-opacity": 0.9,
+            "circle-color": ["match", ["get", "septic_risk"], "HIGH", "#c62828", "MODERATE", "#ff8f00", "LOW", "#7cb342", "#ccc"],
+          } },
+        { id: "soil-label", type: "symbol", source: "soil",
+          layout: { visibility: "none", "text-field": ["get", "musym"], "text-font": ["Open Sans Regular"], "text-size": 8 },
+          paint: { "text-color": "#2e2e2e", "text-halo-color": "#fff", "text-halo-width": 0.8 } },
+        { id: "flood-fill", type: "fill", source: "flood",
+          layout: { visibility: "none" },
+          paint: { "fill-color": "#1e88e5", "fill-opacity": 0.22 } },
+        { id: "flood-line", type: "line", source: "flood",
+          layout: { visibility: "none" },
+          paint: { "line-color": "#0d47a1", "line-width": 1, "line-opacity": 0.6, "line-dasharray": [2, 1] } },
+        { id: "depressions-fill", type: "fill", source: "depressions",
+          paint: { "fill-opacity": 0.42, "fill-color": ["get", "color"] } },
+        { id: "depressions-line", type: "line", source: "depressions",
+          paint: { "line-width": 2, "line-color": ["get", "stroke"] } },
+        { id: "timelapse-circle", type: "circle", source: "timelapse",
+          layout: { visibility: "none" },
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["get", "deltaM"], 1, 3, 3, 6, 6, 9, 12, 14],
+            "circle-color": ["interpolate", ["linear"], ["get", "deltaM"], 1, "#ffd54f", 3, "#ff8f00", 6, "#e53935", 12, "#8e0000"],
+            "circle-stroke-color": "#fff", "circle-stroke-width": 0.8, "circle-opacity": 0.92, "circle-stroke-opacity": 0.9,
+          } },
+        { id: "springs-circle", type: "circle", source: "springs",
+          layout: { visibility: "none" },
+          paint: { "circle-radius": 5, "circle-color": "#3b7dd8",
+            "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } },
+        { id: "bedrock-karst-fill", type: "fill", source: "bedrock-karst",
+          layout: { visibility: "none" },
+          paint: { "fill-color": "#ff6b35", "fill-opacity": 0.15 } },
+        { id: "bedrock-karst-line", type: "line", source: "bedrock-karst",
+          layout: { visibility: "none" },
+          paint: { "line-color": "#ff6b35", "line-width": 1.5,
+            "line-opacity": 0.8, "line-dasharray": [3, 1] } },
+        { id: "caves-circles", type: "circle", source: "caves",
+          layout: { visibility: "none" },
+          paint: {
+            "circle-radius": ["step", ["get", "count"], 6, 50, 10, 100, 14, 200, 18],
+            "circle-color": "#7c3aed", "circle-stroke-color": "#fff",
+            "circle-stroke-width": 1, "circle-opacity": 0.85,
+          } },
+        { id: "caves-label", type: "symbol", source: "caves",
+          layout: { visibility: "none", "text-field": ["get", "count"],
+            "text-font": ["Open Sans Regular"], "text-size": 11 },
+          paint: { "text-color": "#fff", "text-halo-color": "#7c3aed",
+            "text-halo-width": 0.8 } },
+        { id: "draw-fill", type: "fill", source: "draw-fill",
+          paint: { "fill-color": "#2e7d5b", "fill-opacity": 0.08 } },
+        { id: "draw-line", type: "line", source: "draw-line",
+          paint: { "line-color": "#2e7d5b", "line-width": 2.5, "line-dasharray": [2, 1.5] } },
+        { id: "draw-verts", type: "circle", source: "draw-verts",
+          paint: { "circle-radius": 5.5, "circle-color": "#2e7d5b",
+            "circle-stroke-color": "#fff", "circle-stroke-width": 2 } },
+      ];
+      for (const L of layers) map.addLayer(L);
+
       // Custom polygon drawing (MapboxDraw is unreliable on MapLibre — clicks
       // don't register points). We own the whole interaction: click to add
       // vertices, click first point or double-click to close, Esc cancels.
